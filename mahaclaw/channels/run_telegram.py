@@ -1,8 +1,14 @@
 """Run Maha Claw with Telegram channel — wires adapter + bridge together.
 
 Usage:
+    # Recommended: steward-only mode (no API key needed, uses Steward's LLMs)
+    TELEGRAM_BOT_TOKEN=xxx python3 -m mahaclaw.channels.run_telegram --steward-only
+
+    # Federation mode (default — routes through pipeline, can switch modes)
     TELEGRAM_BOT_TOKEN=xxx python3 -m mahaclaw.channels.run_telegram
-    TELEGRAM_BOT_TOKEN=xxx python3 -m mahaclaw.channels.run_telegram --standalone
+
+    # Standalone mode (bring your own LLM)
+    MAHACLAW_LLM_URL=http://localhost:11434/v1 TELEGRAM_BOT_TOKEN=xxx python3 -m mahaclaw.channels.run_telegram --standalone
 """
 from __future__ import annotations
 
@@ -13,8 +19,12 @@ from .bridge import ChannelBridge, BridgeConfig
 
 
 def main() -> int:
-    # Parse mode
     standalone = "--standalone" in sys.argv
+    steward_only = "--steward-only" in sys.argv
+
+    if standalone and steward_only:
+        print("error: --standalone and --steward-only are mutually exclusive", file=sys.stderr)
+        return 1
 
     try:
         tg_cfg = tg_config()
@@ -22,8 +32,16 @@ def main() -> int:
         print(f"error: {e}", file=sys.stderr)
         return 1
 
+    if steward_only:
+        mode = "steward-only"
+    elif standalone:
+        mode = "standalone"
+    else:
+        mode = "federation"
+
     bridge_cfg = BridgeConfig(
-        mode="standalone" if standalone else "federation",
+        mode=mode,
+        steward_only=steward_only,
     )
     bridge = ChannelBridge(bridge_cfg)
 
@@ -37,9 +55,10 @@ def main() -> int:
     # Create adapter with bridge as handler
     adapter = TelegramAdapter(tg_cfg, bridge.handle_message)
 
-    mode_label = "standalone" if standalone else "federation"
-    print(f"Maha Claw — Telegram ({mode_label} mode)")
-    print(f"  long-polling started")
+    print(f"Maha Claw — Telegram ({mode} mode)")
+    if steward_only:
+        print("  All messages route through Steward (no local LLM)")
+    print("  long-polling started")
 
     try:
         adapter.start()

@@ -121,11 +121,14 @@ python -m mahaclaw.chat --standalone
 python -m mahaclaw.chat --standalone --model llama3.2
 MAHACLAW_LLM_URL=https://openrouter.ai/api/v1 MAHACLAW_LLM_KEY=sk-... python -m mahaclaw.chat --standalone
 
-# Telegram bot (federation mode)
+# Recommended: Steward-Only Mode (no API key needed, uses Steward's 3 free LLMs)
+TELEGRAM_BOT_TOKEN=xxx python -m mahaclaw.channels.run_telegram --steward-only
+
+# Telegram bot (federation mode — can switch modes via /mode)
 TELEGRAM_BOT_TOKEN=xxx python -m mahaclaw.channels.run_telegram
 
-# Telegram bot (standalone LLM mode)
-TELEGRAM_BOT_TOKEN=xxx python -m mahaclaw.channels.run_telegram --standalone
+# Alternative: Standalone Mode (bring your own LLM)
+MAHACLAW_LLM_URL=http://localhost:11434/v1 TELEGRAM_BOT_TOKEN=xxx python -m mahaclaw.channels.run_telegram --standalone
 
 # Socket client
 echo '{"intent":"inquiry","target":"agent-research"}' | \

@@ -94,6 +94,56 @@ def build_envelope(intent: dict, rama: RAMASignal, route: dict) -> dict:
     }
 
 
+def normalize_envelope(data: dict) -> dict:
+    """Normalize any envelope format (legacy or current) to the full wire format.
+
+    Legacy envelopes (from steward-federation/nadi/ channel files) lack
+    MahaHeader fields.  This fills defaults so downstream code can rely
+    on a consistent schema.
+
+    Always WRITES the current format — this only normalizes on READ.
+    """
+    env = dict(data)
+
+    # Ensure all required fields have at least a default
+    env.setdefault("envelope_id", env.get("id", ""))
+    env.setdefault("id", env.get("envelope_id", ""))
+    env.setdefault("correlation_id", "")
+    env.setdefault("source", "")
+    env.setdefault("source_city_id", env.get("source", ""))
+    env.setdefault("target", "")
+    env.setdefault("target_city_id", env.get("target", ""))
+    env.setdefault("operation", "")
+    env.setdefault("payload", {})
+    env.setdefault("timestamp", 0)
+    env.setdefault("priority", 5)
+
+    # MahaHeader fields — defaults for legacy envelopes
+    env.setdefault("nadi_type", "vyana")
+    env.setdefault("nadi_op", "send")
+    env.setdefault("nadi_priority", "rajas")
+
+    # TTL normalization
+    if "ttl_ms" not in env and "ttl_s" in env:
+        env["ttl_ms"] = int(env["ttl_s"] * 1000)
+    env.setdefault("ttl_ms", 24_000)
+    env.setdefault("ttl_s", env["ttl_ms"] / 1000.0)
+
+    # Compute MahaHeader if missing
+    if not env.get("maha_header_hex"):
+        env["maha_header_hex"] = build_maha_header_hex(
+            env["source"], env["target"], env["operation"],
+            env["nadi_type"], env["nadi_priority"], env["ttl_ms"],
+        )
+
+    return env
+
+
+def is_legacy_envelope(data: dict) -> bool:
+    """Check if an envelope is legacy format (missing MahaHeader fields)."""
+    return not data.get("maha_header_hex") or not data.get("nadi_type")
+
+
 def build_and_enqueue(intent: dict, rama: RAMASignal, route: dict) -> tuple[str, str]:
     """Build envelope and append to outbox.
 

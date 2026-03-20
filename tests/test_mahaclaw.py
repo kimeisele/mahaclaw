@@ -1101,3 +1101,186 @@ from mahaclaw.chat import main; raise SystemExit(main())
         assert "standalone" in result.stdout.lower()
         assert "federation" in result.stdout.lower()
         assert "bye" in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# Legacy Envelope Compatibility
+# ---------------------------------------------------------------------------
+
+from mahaclaw.envelope import normalize_envelope, is_legacy_envelope
+
+
+class TestLegacyEnvelopeCompat:
+    def test_legacy_envelope_detected(self):
+        legacy = {
+            "source": "steward",
+            "target": "mahaclaw",
+            "operation": "heartbeat",
+            "payload": {"health": 0.95},
+            "timestamp": 1774014592.66,
+            "priority": 1,
+            "correlation_id": "corr-123",
+            "ttl_s": 900.0,
+            "id": "974960abc",
+        }
+        assert is_legacy_envelope(legacy) is True
+
+    def test_current_envelope_not_legacy(self):
+        current = {
+            "maha_header_hex": "a" * 32,
+            "nadi_type": "vyana",
+            "nadi_op": "send",
+            "nadi_priority": "rajas",
+            "source": "steward",
+            "target": "mahaclaw",
+        }
+        assert is_legacy_envelope(current) is False
+
+    def test_normalize_legacy_adds_maha_fields(self):
+        legacy = {
+            "source": "steward",
+            "target": "mahaclaw",
+            "operation": "heartbeat",
+            "payload": {"health": 0.95},
+            "timestamp": 1774014592.66,
+            "priority": 1,
+            "correlation_id": "corr-123",
+            "ttl_s": 900.0,
+            "id": "974960abc",
+        }
+        normalized = normalize_envelope(legacy)
+
+        # MahaHeader fields filled with defaults
+        assert normalized["nadi_type"] == "vyana"
+        assert normalized["nadi_op"] == "send"
+        assert normalized["nadi_priority"] == "rajas"
+        assert len(normalized["maha_header_hex"]) == 32
+        # TTL computed from ttl_s
+        assert normalized["ttl_ms"] == 900000
+        # Original fields preserved
+        assert normalized["source"] == "steward"
+        assert normalized["correlation_id"] == "corr-123"
+        assert normalized["payload"]["health"] == 0.95
+
+    def test_normalize_current_is_idempotent(self):
+        current = {
+            "source": "steward",
+            "target": "mahaclaw",
+            "operation": "inquiry_response",
+            "payload": {"answer": "42"},
+            "timestamp": 1774014592.66,
+            "priority": 5,
+            "correlation_id": "corr-456",
+            "ttl_s": 24.0,
+            "ttl_ms": 24000,
+            "nadi_type": "apana",
+            "nadi_op": "send",
+            "nadi_priority": "sattva",
+            "maha_header_hex": "b" * 32,
+            "envelope_id": "env_abc",
+            "id": "id_abc",
+        }
+        normalized = normalize_envelope(current)
+        # All existing values preserved
+        assert normalized["nadi_type"] == "apana"
+        assert normalized["nadi_priority"] == "sattva"
+        assert normalized["maha_header_hex"] == "b" * 32
+
+    def test_normalize_fills_missing_ids(self):
+        minimal = {
+            "correlation_id": "c1",
+            "source": "x",
+            "target": "y",
+            "operation": "op",
+            "payload": {},
+        }
+        normalized = normalize_envelope(minimal)
+        assert normalized["source_city_id"] == "x"
+        assert normalized["target_city_id"] == "y"
+        assert normalized["ttl_ms"] == 24000
+        assert normalized["ttl_s"] == 24.0
+
+    def test_poll_accepts_legacy_response(self, tmp_path):
+        """Poll finds and normalizes a legacy envelope matching correlation_id."""
+        inbox = tmp_path / "nadi_inbox.json"
+        legacy_response = {
+            "correlation_id": "legacy-corr-001",
+            "source": "steward",
+            "target": "mahaclaw",
+            "operation": "inquiry_response",
+            "payload": {"answer": "federation has 4 agents"},
+            "timestamp": 1774014592.66,
+            "priority": 1,
+            "ttl_s": 900.0,
+            "id": "legacy-id-001",
+        }
+        inbox.write_text(json.dumps([legacy_response]) + "\n")
+
+        result = poll_response("legacy-corr-001", timeout_s=0.5, inbox_path=inbox)
+        assert result is not None
+        assert result["correlation_id"] == "legacy-corr-001"
+        # Should be normalized — has MahaHeader fields
+        assert result["nadi_type"] == "vyana"
+        assert len(result["maha_header_hex"]) == 32
+        assert result["payload"]["answer"] == "federation has 4 agents"
+
+
+# ---------------------------------------------------------------------------
+# Steward-Only Bridge Mode
+# ---------------------------------------------------------------------------
+
+
+class TestStewardOnlyBridge:
+    def test_steward_only_routes_through_pipeline(self, tmp_path, monkeypatch):
+        """In steward-only mode, all messages go through federation pipeline."""
+        outbox = tmp_path / "nadi_outbox.json"
+        outbox.write_text("[]\n")
+        import mahaclaw.envelope as env_mod
+        monkeypatch.setattr(env_mod, "OUTBOX_PATH", outbox)
+        reload()
+
+        replies = []
+        bridge = ChannelBridge(BridgeConfig(
+            session_db=str(tmp_path / "test.db"),
+            steward_only=True,
+            response_wait_s=0,
+        ))
+        bridge.register_sender("test", lambda cid, text, rt: replies.append(text))
+
+        msg = IncomingMessage(
+            channel="test", user_id="u1", username="alice",
+            text="hello steward", chat_id="c1",
+        )
+        bridge.handle_message(msg)
+
+        # Should route through pipeline (not standalone)
+        assert len(replies) == 1
+        assert "steward" in replies[0].lower()
+
+        data = json.loads(outbox.read_text())
+        assert len(data) == 1
+        assert data[0]["payload"]["message"] == "hello steward"
+        bridge.close()
+
+    def test_steward_only_mode_lock(self, tmp_path):
+        """In steward-only mode, /mode command is locked."""
+        replies = []
+        bridge = ChannelBridge(BridgeConfig(
+            session_db=str(tmp_path / "test.db"),
+            steward_only=True,
+        ))
+        bridge.register_sender("test", lambda cid, text, rt: replies.append(text))
+
+        msg = IncomingMessage(
+            channel="test", user_id="u1", username="a",
+            text="/mode", chat_id="c1",
+        )
+        bridge.handle_message(msg)
+        assert "locked" in replies[0].lower()
+        bridge.close()
+
+    def test_detect_intent_research_keywords(self):
+        assert _detect_intent("research quantum computing") == "inquiry"
+        assert _detect_intent("investigate this bug") == "inquiry"
+        assert _detect_intent("what agents are in the network?") == "discover_peers"
+        assert _detect_intent("refactor the code") == "code_analysis"

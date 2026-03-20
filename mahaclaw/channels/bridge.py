@@ -35,12 +35,14 @@ RESPONSE_POLL_INTERVAL_S = 0.5
 @dataclass
 class BridgeConfig:
     """Configuration for the channel bridge."""
-    mode: str = "federation"        # "federation" or "standalone"
+    mode: str = "federation"        # "federation", "standalone", or "steward-only"
     default_target: str = DEFAULT_TARGET
     response_wait_s: float = DEFAULT_WAIT_S
     session_db: str = "mahaclaw_sessions.db"
     # Standalone mode LLM config (only used when mode="standalone")
     llm_config: object = None
+    # steward-only: ALL messages go through pipeline, never call local LLM
+    steward_only: bool = False
 
 
 class ChannelBridge:
@@ -76,7 +78,9 @@ class ChannelBridge:
             self._handle_command(msg)
             return
 
-        if self._config.mode == "standalone":
+        if self._config.steward_only or self._config.mode == "steward-only":
+            self._handle_federation(msg)
+        elif self._config.mode == "standalone":
             self._handle_standalone(msg)
         else:
             self._handle_federation(msg)
@@ -110,8 +114,11 @@ class ChannelBridge:
             self._sessions.get_or_create(msg.session_id, target=new_target)
             self._reply(msg, f"Target switched to: {new_target}")
         elif cmd == "/mode":
-            self._config.mode = "standalone" if self._config.mode == "federation" else "federation"
-            self._reply(msg, f"Mode switched to: {self._config.mode}")
+            if self._config.steward_only:
+                self._reply(msg, "Mode locked: steward-only (all messages route through Steward)")
+            else:
+                self._config.mode = "standalone" if self._config.mode == "federation" else "federation"
+                self._reply(msg, f"Mode switched to: {self._config.mode}")
         elif cmd == "/clear":
             self._conversation_history.pop(msg.session_id, None)
             self._reply(msg, "Conversation history cleared.")
@@ -171,7 +178,12 @@ class ChannelBridge:
         )
 
         if response is None:
-            self._reply(original_msg, "No response from federation (timeout)")
+            if self._config.steward_only:
+                self._reply(original_msg,
+                            "Federation is not responding. Steward may be offline or relay is not running.\n"
+                            "Check that the MURALI cycle and federation relay are active.")
+            else:
+                self._reply(original_msg, "No response from federation (timeout)")
             return
 
         extracted = extract_response_payload(response)
@@ -234,12 +246,14 @@ class ChannelBridge:
 def _detect_intent(text: str) -> str:
     """Detect intent type from natural language message."""
     lower = text.lower()
-    if any(kw in lower for kw in ("build", "code", "compile", "debug", "test")):
+    if any(kw in lower for kw in ("build", "code", "compile", "debug", "test", "fix bug", "refactor")):
         return "code_analysis"
-    if any(kw in lower for kw in ("govern", "vote", "policy", "proposal")):
+    if any(kw in lower for kw in ("govern", "vote", "policy", "proposal", "regulation")):
         return "governance_proposal"
-    if any(kw in lower for kw in ("find", "discover", "search", "who")):
+    if any(kw in lower for kw in ("research", "study", "paper", "analyze", "investigate")):
+        return "inquiry"
+    if any(kw in lower for kw in ("find", "discover", "search", "who", "list agents", "what agents")):
         return "discover_peers"
-    if any(kw in lower for kw in ("status", "ping", "health", "alive")):
+    if any(kw in lower for kw in ("status", "ping", "health", "alive", "heartbeat")):
         return "heartbeat"
     return "inquiry"
