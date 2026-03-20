@@ -52,9 +52,9 @@ async def handle_client(
         route = resolve_route(intent, rama_signal)
 
         # Gate 5: SYNC (build envelope, append to outbox)
-        envelope_id = build_and_enqueue(intent, rama_signal, route)
+        envelope_id, correlation_id = build_and_enqueue(intent, rama_signal, route)
 
-        response = {"ok": True, "envelope_id": envelope_id}
+        response = {"ok": True, "envelope_id": envelope_id, "correlation_id": correlation_id}
         logger.info("relayed %s → %s (%s)", intent["intent"], route["target_city_id"], envelope_id[:8])
 
     except Exception as exc:

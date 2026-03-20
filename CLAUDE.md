@@ -102,8 +102,33 @@ python -m pytest tests/test_mahaclaw.py -q
 # Daemon mode (Unix socket)
 python -m mahaclaw.daemon
 
+# Gateway mode (WebSocket on :18789, replaces OpenClaw Gateway)
+python -m mahaclaw.gateway
+python -m mahaclaw.gateway --port 18789 --host 127.0.0.1
+
 # CLI mode (pipe from OpenClaw skill)
 echo '{"intent":"inquiry","target":"agent-research","payload":{"q":"test"}}' | python -m mahaclaw.cli
+
+# CLI with response wait (blocks up to 10s for federation reply)
+echo '{"intent":"inquiry","target":"agent-research","payload":{"q":"test"}}' | python -m mahaclaw.cli --wait 10
+
+# Standalone chat (no OpenClaw needed)
+python -m mahaclaw.chat
+python -m mahaclaw.chat --target agent-research --wait 30
+
+# Standalone chat with direct LLM (no federation)
+python -m mahaclaw.chat --standalone
+python -m mahaclaw.chat --standalone --model llama3.2
+MAHACLAW_LLM_URL=https://openrouter.ai/api/v1 MAHACLAW_LLM_KEY=sk-... python -m mahaclaw.chat --standalone
+
+# Recommended: Steward-Only Mode (no API key needed, uses Steward's 3 free LLMs)
+TELEGRAM_BOT_TOKEN=xxx python -m mahaclaw.channels.run_telegram --steward-only
+
+# Telegram bot (federation mode — can switch modes via /mode)
+TELEGRAM_BOT_TOKEN=xxx python -m mahaclaw.channels.run_telegram
+
+# Alternative: Standalone Mode (bring your own LLM)
+MAHACLAW_LLM_URL=http://localhost:11434/v1 TELEGRAM_BOT_TOKEN=xxx python -m mahaclaw.channels.run_telegram --standalone
 
 # Socket client
 echo '{"intent":"inquiry","target":"agent-research"}' | \
@@ -123,11 +148,36 @@ mahaclaw/
   rama.py               Gate 3 EXECUTE
   lotus.py              Gate 4 RESULT
   envelope.py           Gate 5 SYNC
+  inbox.py              Return loop — poll nadi_inbox.json for responses
   daemon.py             asyncio Unix socket server
+  gateway.py            WebSocket gateway (port 18789, stdlib RFC 6455)
+  session.py            Session manager (SQLite signed ledger)
   cli.py                stdin/pipe entry point for OpenClaw skills
+  chat.py               standalone terminal chat (federation + standalone LLM)
+  llm.py               Provider-agnostic LLM client (OpenAI-compat, curl-based)
+  __main__.py           python -m mahaclaw.cli alias
+  channels/
+    __init__.py         Channel types (IncomingMessage, MessageHandler)
+    telegram.py         Telegram Bot API adapter (long-polling, pure curl)
+    bridge.py           Channel-to-NADI bridge (intent wrapping + response delivery)
+    run_telegram.py     Wired-up Telegram runner (adapter + bridge)
+  skills/
+    _types.py           Shared types (SkillMetadata, SkillContext, SkillResult)
+    engine.py           Skill discovery, loading, dispatch
+    compat.py           OpenClaw SKILL.md parser
+  tools/
+    sandbox.py          Allowlist shell + scoped filesystem
+
+openclaw_skill/
+  SKILL.md              OpenClaw skill definition (install in any workspace)
+  HEARTBEAT.md          Federation heartbeat checklist for OpenClaw heartbeat
+  hooks/
+    federation-relay.sh command:new hook for automatic forwarding
 
 tests/
-  test_mahaclaw.py      mahaclaw tests
+  test_mahaclaw.py      84 tests (gates + inbox + CLI + chat + session + skills + sandbox + gateway + llm + channels + bridge)
+  integration/
+    mock_openclaw.js    Node.js mock gateway (44 integration tests)
 
 docs/
   maha-claw-architecture.md   architecture with real OpenClaw integration points
@@ -135,6 +185,7 @@ docs/
 scripts/                inherited federation template scripts (don't modify)
 data/federation/        seed descriptors (read by lotus.py)
 nadi_outbox.json        relay outbox
+nadi_inbox.json         relay inbox (federation responses land here)
 ```
 
 ## Key references
