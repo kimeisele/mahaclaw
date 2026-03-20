@@ -497,3 +497,48 @@ print(json.dumps({{"ok": True, "cid": cid}}))
         assert result.returncode == 0, result.stderr
         resp = json.loads(result.stdout)
         assert resp["ok"] is True
+
+
+# ---------------------------------------------------------------------------
+# Standalone Chat
+# ---------------------------------------------------------------------------
+
+
+class TestChat:
+    def test_chat_status_and_quit(self, tmp_path):
+        outbox = tmp_path / "nadi_outbox.json"
+        outbox.write_text("[]\n")
+
+        env_code = f"""
+import sys; sys.argv = ['chat', '--target', 'agent-research', '--nowait']
+import mahaclaw.envelope as m; m.OUTBOX_PATH = __import__('pathlib').Path('{outbox}')
+from mahaclaw.chat import main; raise SystemExit(main())
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", env_code],
+            input="/status\nWhat is dark matter?\n/quit\n",
+            capture_output=True, text=True, timeout=10,
+        )
+        assert result.returncode == 0, result.stderr
+        assert "target: agent-research" in result.stdout
+        assert "jala/research" in result.stdout
+        assert "bye" in result.stdout
+
+    def test_chat_send_writes_outbox(self, tmp_path):
+        outbox = tmp_path / "nadi_outbox.json"
+        outbox.write_text("[]\n")
+
+        env_code = f"""
+import sys; sys.argv = ['chat', '--target', 'agent-research', '--nowait']
+import mahaclaw.envelope as m; m.OUTBOX_PATH = __import__('pathlib').Path('{outbox}')
+from mahaclaw.chat import main; raise SystemExit(main())
+"""
+        subprocess.run(
+            [sys.executable, "-c", env_code],
+            input="hello federation\n/quit\n",
+            capture_output=True, text=True, timeout=10,
+        )
+        data = json.loads(outbox.read_text())
+        assert len(data) == 1
+        assert data[0]["payload"]["message"] == "hello federation"
+        assert data[0]["target_city_id"] == "kimeisele/agent-research"

@@ -129,6 +129,7 @@ mahaclaw/
   inbox.py              Return loop — poll nadi_inbox.json for responses
   daemon.py             asyncio Unix socket server
   cli.py                stdin/pipe entry point for OpenClaw skills
+  chat.py               standalone terminal chat (no OpenClaw needed)
   __main__.py           python -m mahaclaw.cli alias
 
 openclaw_skill/
@@ -138,7 +139,9 @@ openclaw_skill/
     federation-relay.sh command:new hook for automatic forwarding
 
 tests/
-  test_mahaclaw.py      37 tests (gates + inbox + CLI + e2e + socket)
+  test_mahaclaw.py      39 tests (gates + inbox + CLI + chat + e2e + socket)
+  integration/
+    mock_openclaw.js    Node.js mock gateway (44 integration tests)
 
 docs/
   maha-claw-architecture.md   architecture with real OpenClaw integration points
