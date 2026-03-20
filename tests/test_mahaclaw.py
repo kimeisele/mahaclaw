@@ -26,6 +26,19 @@ class TestParseGate:
         assert result["payload"] == {"q": "test"}
         assert result["priority"] == "rajas"
         assert result["ttl_ms"] == 24_000
+        assert result["openclaw"] == {}
+
+    def test_openclaw_metadata_preserved(self):
+        raw = json.dumps({
+            "intent": "inquiry", "target": "agent-research",
+            "openclaw_session": "agent:default:telegram:dm:12345",
+            "openclaw_skill": "federation-bridge",
+            "openclaw_channel": "telegram",
+        })
+        result = parse_intent(raw)
+        assert result["openclaw"]["session"] == "agent:default:telegram:dm:12345"
+        assert result["openclaw"]["skill"] == "federation-bridge"
+        assert result["openclaw"]["channel"] == "telegram"
 
     def test_missing_field(self):
         with pytest.raises(ValueError, match="missing required"):
@@ -182,6 +195,27 @@ from mahaclaw.envelope import build_envelope, build_maha_header_hex, OUTBOX_PATH
 
 
 class TestEnvelopeGate:
+    def test_openclaw_metadata_in_envelope(self):
+        intent = {
+            "intent": "inquiry", "target": "agent-research", "payload": {},
+            "priority": "rajas", "ttl_ms": 24000,
+            "openclaw": {"session": "agent:default:telegram:dm:999", "skill": "fed-bridge"},
+        }
+        tattva = classify(intent)
+        rama = encode_rama(intent, tattva)
+        route = {"target_city_id": "kimeisele/agent-research", "target_name": "agent-research"}
+        env = build_envelope(intent, rama, route)
+        assert env["payload"]["_openclaw"]["session"] == "agent:default:telegram:dm:999"
+        assert env["payload"]["_openclaw"]["skill"] == "fed-bridge"
+
+    def test_no_openclaw_when_empty(self):
+        intent = {"intent": "inquiry", "target": "agent-research", "payload": {}, "priority": "rajas", "ttl_ms": 24000, "openclaw": {}}
+        tattva = classify(intent)
+        rama = encode_rama(intent, tattva)
+        route = {"target_city_id": "kimeisele/agent-research", "target_name": "agent-research"}
+        env = build_envelope(intent, rama, route)
+        assert "_openclaw" not in env["payload"]
+
     def test_build_envelope_format(self):
         intent = {"intent": "inquiry", "target": "agent-research", "payload": {"q": "test"}, "priority": "rajas", "ttl_ms": 24000}
         tattva = classify(intent)
@@ -305,3 +339,42 @@ class TestDaemon:
         finally:
             server.close()
             await server.wait_closed()
+
+
+# ---------------------------------------------------------------------------
+# CLI entry point
+# ---------------------------------------------------------------------------
+
+import subprocess
+import sys
+
+
+class TestCLI:
+    def test_cli_pipe(self, tmp_path, monkeypatch):
+        outbox = tmp_path / "nadi_outbox.json"
+        outbox.write_text("[]\n")
+
+        env_code = f"""
+import mahaclaw.envelope as m; m.OUTBOX_PATH = __import__('pathlib').Path('{outbox}')
+from mahaclaw.cli import main; raise SystemExit(main())
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", env_code],
+            input='{"intent":"heartbeat","target":"agent-city"}',
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 0, result.stderr
+        resp = json.loads(result.stdout)
+        assert resp["ok"] is True
+        assert resp["envelope_id"].startswith("env_")
+        assert resp["element"] == "vayu"
+        assert resp["guardian"] == "vyasa"
+
+    def test_cli_empty_input(self):
+        result = subprocess.run(
+            [sys.executable, "-c", "from mahaclaw.cli import main; raise SystemExit(main())"],
+            input="", capture_output=True, text=True,
+        )
+        assert result.returncode == 1
+        resp = json.loads(result.stdout)
+        assert resp["ok"] is False

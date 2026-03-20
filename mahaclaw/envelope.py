@@ -81,6 +81,7 @@ def build_envelope(intent: dict, rama: RAMASignal, route: dict) -> dict:
             **intent.get("payload", {}),
             "_rama": rama.to_dict(),
             "_source_intent": intent["intent"],
+            **({"_openclaw": intent["openclaw"]} if intent.get("openclaw") else {}),
         },
         "priority": {"tamas": 1, "rajas": 5, "sattva": 8, "suddha": 10}.get(rama.guna, 5),
         "source": SOURCE_CITY_ID,

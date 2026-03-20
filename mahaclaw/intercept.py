@@ -36,10 +36,22 @@ def parse_intent(raw: str) -> dict:
     if not target:
         raise ValueError("target must be non-empty")
 
+    # OpenClaw metadata (preserved for reverse path)
+    openclaw = {}
+    if data.get("openclaw_session"):
+        openclaw["session"] = str(data["openclaw_session"])
+    if data.get("openclaw_skill"):
+        openclaw["skill"] = str(data["openclaw_skill"])
+    if data.get("openclaw_channel"):
+        openclaw["channel"] = str(data["openclaw_channel"])
+    if data.get("openclaw_agent"):
+        openclaw["agent"] = str(data["openclaw_agent"])
+
     return {
         "intent": intent,
         "target": target,
         "payload": data.get("payload") or {},
         "priority": str(data.get("priority", "rajas")).strip().lower(),
         "ttl_ms": int(data.get("ttl_ms", 24_000)),
+        "openclaw": openclaw,
     }
