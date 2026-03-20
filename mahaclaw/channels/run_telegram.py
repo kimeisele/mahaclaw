@@ -28,8 +28,12 @@ def main() -> int:
 
     try:
         tg_cfg = tg_config()
-    except RuntimeError as e:
-        print(f"error: {e}", file=sys.stderr)
+    except RuntimeError:
+        print("TELEGRAM_BOT_TOKEN not set.", file=sys.stderr)
+        print("", file=sys.stderr)
+        print("Get a token from @BotFather on Telegram, then:", file=sys.stderr)
+        print("  export TELEGRAM_BOT_TOKEN=your-token-here", file=sys.stderr)
+        print(f"  python3 -m mahaclaw.channels.run_telegram {'--steward-only' if steward_only else '--standalone' if standalone else ''}", file=sys.stderr)
         return 1
 
     if steward_only:
