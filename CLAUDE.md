@@ -105,6 +105,9 @@ python -m mahaclaw.daemon
 # CLI mode (pipe from OpenClaw skill)
 echo '{"intent":"inquiry","target":"agent-research","payload":{"q":"test"}}' | python -m mahaclaw.cli
 
+# CLI with response wait (blocks up to 10s for federation reply)
+echo '{"intent":"inquiry","target":"agent-research","payload":{"q":"test"}}' | python -m mahaclaw.cli --wait 10
+
 # Socket client
 echo '{"intent":"inquiry","target":"agent-research"}' | \
   python -c "import socket,sys; s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM); s.connect('mahaclaw.sock'); s.sendall(sys.stdin.buffer.read()); s.shutdown(1); print(s.recv(65536).decode())"
@@ -123,11 +126,19 @@ mahaclaw/
   rama.py               Gate 3 EXECUTE
   lotus.py              Gate 4 RESULT
   envelope.py           Gate 5 SYNC
+  inbox.py              Return loop — poll nadi_inbox.json for responses
   daemon.py             asyncio Unix socket server
   cli.py                stdin/pipe entry point for OpenClaw skills
+  __main__.py           python -m mahaclaw.cli alias
+
+openclaw_skill/
+  SKILL.md              OpenClaw skill definition (install in any workspace)
+  HEARTBEAT.md          Federation heartbeat checklist for OpenClaw heartbeat
+  hooks/
+    federation-relay.sh command:new hook for automatic forwarding
 
 tests/
-  test_mahaclaw.py      mahaclaw tests
+  test_mahaclaw.py      37 tests (gates + inbox + CLI + e2e + socket)
 
 docs/
   maha-claw-architecture.md   architecture with real OpenClaw integration points
@@ -135,6 +146,7 @@ docs/
 scripts/                inherited federation template scripts (don't modify)
 data/federation/        seed descriptors (read by lotus.py)
 nadi_outbox.json        relay outbox
+nadi_inbox.json         relay inbox (federation responses land here)
 ```
 
 ## Key references
