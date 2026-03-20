@@ -116,6 +116,17 @@ echo '{"intent":"inquiry","target":"agent-research","payload":{"q":"test"}}' | p
 python -m mahaclaw.chat
 python -m mahaclaw.chat --target agent-research --wait 30
 
+# Standalone chat with direct LLM (no federation)
+python -m mahaclaw.chat --standalone
+python -m mahaclaw.chat --standalone --model llama3.2
+MAHACLAW_LLM_URL=https://openrouter.ai/api/v1 MAHACLAW_LLM_KEY=sk-... python -m mahaclaw.chat --standalone
+
+# Telegram bot (federation mode)
+TELEGRAM_BOT_TOKEN=xxx python -m mahaclaw.channels.run_telegram
+
+# Telegram bot (standalone LLM mode)
+TELEGRAM_BOT_TOKEN=xxx python -m mahaclaw.channels.run_telegram --standalone
+
 # Socket client
 echo '{"intent":"inquiry","target":"agent-research"}' | \
   python -c "import socket,sys; s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM); s.connect('mahaclaw.sock'); s.sendall(sys.stdin.buffer.read()); s.shutdown(1); print(s.recv(65536).decode())"
@@ -139,8 +150,14 @@ mahaclaw/
   gateway.py            WebSocket gateway (port 18789, stdlib RFC 6455)
   session.py            Session manager (SQLite signed ledger)
   cli.py                stdin/pipe entry point for OpenClaw skills
-  chat.py               standalone terminal chat (no OpenClaw needed)
+  chat.py               standalone terminal chat (federation + standalone LLM)
+  llm.py               Provider-agnostic LLM client (OpenAI-compat, curl-based)
   __main__.py           python -m mahaclaw.cli alias
+  channels/
+    __init__.py         Channel types (IncomingMessage, MessageHandler)
+    telegram.py         Telegram Bot API adapter (long-polling, pure curl)
+    bridge.py           Channel-to-NADI bridge (intent wrapping + response delivery)
+    run_telegram.py     Wired-up Telegram runner (adapter + bridge)
   skills/
     _types.py           Shared types (SkillMetadata, SkillContext, SkillResult)
     engine.py           Skill discovery, loading, dispatch
@@ -155,7 +172,7 @@ openclaw_skill/
     federation-relay.sh command:new hook for automatic forwarding
 
 tests/
-  test_mahaclaw.py      64 tests (gates + inbox + CLI + chat + session + skills + sandbox + gateway)
+  test_mahaclaw.py      84 tests (gates + inbox + CLI + chat + session + skills + sandbox + gateway + llm + channels + bridge)
   integration/
     mock_openclaw.js    Node.js mock gateway (44 integration tests)
 

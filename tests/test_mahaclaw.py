@@ -821,3 +821,283 @@ class TestGateway:
         finally:
             server.close()
             await server.wait_closed()
+
+
+# ---------------------------------------------------------------------------
+# LLM Client
+# ---------------------------------------------------------------------------
+
+from mahaclaw.llm import (
+    LLMConfig, LLMResponse, chat, ask, is_available, config_from_env,
+    _curl_post, DEFAULT_BASE_URL, DEFAULT_MODEL,
+)
+
+
+class TestLLMClient:
+    def test_config_defaults(self):
+        config = LLMConfig()
+        assert config.base_url == DEFAULT_BASE_URL
+        assert config.model == DEFAULT_MODEL
+        assert config.temperature == 0.7
+        assert config.max_tokens == 1024
+
+    def test_config_from_env(self, monkeypatch):
+        monkeypatch.setenv("MAHACLAW_LLM_URL", "http://test:1234/v1")
+        monkeypatch.setenv("MAHACLAW_LLM_MODEL", "test-model")
+        monkeypatch.setenv("MAHACLAW_LLM_KEY", "sk-test")
+        config = config_from_env()
+        assert config.base_url == "http://test:1234/v1"
+        assert config.model == "test-model"
+        assert config.api_key == "sk-test"
+
+    def test_llm_response_dataclass(self):
+        resp = LLMResponse(ok=True, content="hello", model="test", duration_ms=42.0)
+        assert resp.ok is True
+        assert resp.content == "hello"
+
+    def test_chat_unreachable_endpoint(self):
+        """Chat with an unreachable endpoint returns error gracefully."""
+        config = LLMConfig(base_url="http://127.0.0.1:1/v1", timeout_s=2)
+        resp = chat([{"role": "user", "content": "test"}], config)
+        assert resp.ok is False
+        assert resp.error  # Should have an error message
+
+    def test_ask_builds_messages(self, monkeypatch):
+        """Verify ask() builds the right message structure."""
+        captured = {}
+
+        def mock_chat(messages, config):
+            captured["messages"] = messages
+            return LLMResponse(ok=True, content="mocked", model="test")
+
+        import mahaclaw.llm as llm_mod
+        monkeypatch.setattr(llm_mod, "chat", mock_chat)
+
+        config = LLMConfig(system_prompt="You are a test bot.")
+        history = [{"role": "user", "content": "prev"}, {"role": "assistant", "content": "prev-resp"}]
+        resp = ask("hello", config=config, history=history)
+
+        assert resp.ok is True
+        msgs = captured["messages"]
+        assert msgs[0]["role"] == "system"
+        assert msgs[0]["content"] == "You are a test bot."
+        assert msgs[1]["role"] == "user"
+        assert msgs[1]["content"] == "prev"
+        assert msgs[2]["role"] == "assistant"
+        assert msgs[3]["role"] == "user"
+        assert msgs[3]["content"] == "hello"
+
+    def test_is_available_unreachable(self):
+        config = LLMConfig(base_url="http://127.0.0.1:1/v1", timeout_s=2)
+        avail, info = is_available(config)
+        assert avail is False
+
+
+# ---------------------------------------------------------------------------
+# Channel Types
+# ---------------------------------------------------------------------------
+
+from mahaclaw.channels import IncomingMessage
+
+
+class TestChannelTypes:
+    def test_incoming_message_session_id(self):
+        msg = IncomingMessage(
+            channel="telegram", user_id="123", username="alice",
+            text="hello", chat_id="456",
+        )
+        assert msg.session_id == "mahaclaw:telegram:456:123"
+
+    def test_incoming_message_defaults(self):
+        msg = IncomingMessage(
+            channel="discord", user_id="u1", username="bob",
+            text="test", chat_id="c1",
+        )
+        assert msg.reply_to == ""
+        assert msg.raw == {}
+
+
+# ---------------------------------------------------------------------------
+# Telegram Adapter (unit tests — no network)
+# ---------------------------------------------------------------------------
+
+from mahaclaw.channels.telegram import _normalize_update, TelegramConfig
+
+
+class TestTelegramAdapter:
+    def test_normalize_text_message(self):
+        update = {
+            "update_id": 1,
+            "message": {
+                "message_id": 42,
+                "from": {"id": 123, "username": "alice", "first_name": "Alice"},
+                "chat": {"id": -456, "type": "group"},
+                "text": "hello federation",
+            },
+        }
+        msg = _normalize_update(update)
+        assert msg is not None
+        assert msg.channel == "telegram"
+        assert msg.user_id == "123"
+        assert msg.username == "alice"
+        assert msg.text == "hello federation"
+        assert msg.chat_id == "-456"
+
+    def test_normalize_no_text(self):
+        update = {"update_id": 2, "message": {"message_id": 43, "from": {"id": 1}, "chat": {"id": 1}, "photo": []}}
+        msg = _normalize_update(update)
+        assert msg is None
+
+    def test_normalize_no_message(self):
+        update = {"update_id": 3}
+        msg = _normalize_update(update)
+        assert msg is None
+
+    def test_normalize_edited_message(self):
+        update = {
+            "update_id": 4,
+            "edited_message": {
+                "message_id": 44,
+                "from": {"id": 789, "first_name": "Bob"},
+                "chat": {"id": 100},
+                "text": "edited text",
+            },
+        }
+        msg = _normalize_update(update)
+        assert msg is not None
+        assert msg.text == "edited text"
+        assert msg.username == "Bob"
+
+    def test_config_allowed_users(self):
+        cfg = TelegramConfig(token="test", allowed_users=frozenset({"123", "456"}))
+        assert "123" in cfg.allowed_users
+        assert "789" not in cfg.allowed_users
+
+
+# ---------------------------------------------------------------------------
+# Channel Bridge
+# ---------------------------------------------------------------------------
+
+from mahaclaw.channels.bridge import ChannelBridge, BridgeConfig, _detect_intent
+
+
+class TestChannelBridge:
+    def test_detect_intent_types(self):
+        assert _detect_intent("build something") == "code_analysis"
+        assert _detect_intent("what's the governance policy?") == "governance_proposal"
+        assert _detect_intent("find agents nearby") == "discover_peers"
+        assert _detect_intent("are you alive?") == "heartbeat"
+        assert _detect_intent("tell me about quantum physics") == "inquiry"
+
+    def test_bridge_command_help(self, tmp_path):
+        replies = []
+        bridge = ChannelBridge(BridgeConfig(session_db=str(tmp_path / "test.db")))
+        bridge.register_sender("test", lambda cid, text, rt: replies.append(text))
+
+        msg = IncomingMessage(channel="test", user_id="u1", username="a", text="/help", chat_id="c1")
+        bridge.handle_message(msg)
+        assert len(replies) == 1
+        assert "/status" in replies[0]
+        bridge.close()
+
+    def test_bridge_command_status(self, tmp_path):
+        replies = []
+        bridge = ChannelBridge(BridgeConfig(session_db=str(tmp_path / "test.db")))
+        bridge.register_sender("test", lambda cid, text, rt: replies.append(text))
+
+        msg = IncomingMessage(channel="test", user_id="u1", username="a", text="/status", chat_id="c1")
+        bridge.handle_message(msg)
+        assert len(replies) == 1
+        assert "federation" in replies[0].lower() or "Mode" in replies[0]
+        bridge.close()
+
+    def test_bridge_command_mode_toggle(self, tmp_path):
+        replies = []
+        bridge = ChannelBridge(BridgeConfig(session_db=str(tmp_path / "test.db")))
+        bridge.register_sender("test", lambda cid, text, rt: replies.append(text))
+
+        msg = IncomingMessage(channel="test", user_id="u1", username="a", text="/mode", chat_id="c1")
+        bridge.handle_message(msg)
+        assert "standalone" in replies[0].lower()
+
+        bridge.handle_message(msg)
+        assert "federation" in replies[1].lower()
+        bridge.close()
+
+    def test_bridge_federation_send(self, tmp_path, monkeypatch):
+        """Test that federation mode runs the pipeline and writes to outbox."""
+        outbox = tmp_path / "nadi_outbox.json"
+        outbox.write_text("[]\n")
+        import mahaclaw.envelope as env_mod
+        monkeypatch.setattr(env_mod, "OUTBOX_PATH", outbox)
+        from mahaclaw.lotus import reload
+        reload()
+
+        replies = []
+        bridge = ChannelBridge(BridgeConfig(
+            session_db=str(tmp_path / "test.db"),
+            response_wait_s=0,  # fire-and-forget for test
+        ))
+        bridge.register_sender("test", lambda cid, text, rt: replies.append(text))
+
+        msg = IncomingMessage(
+            channel="test", user_id="u1", username="alice",
+            text="What is dark matter?", chat_id="c1",
+        )
+        bridge.handle_message(msg)
+
+        assert len(replies) == 1
+        assert "jala/research" in replies[0]
+
+        # Verify outbox got an envelope
+        data = json.loads(outbox.read_text())
+        assert len(data) == 1
+        assert data[0]["payload"]["message"] == "What is dark matter?"
+        bridge.close()
+
+
+# ---------------------------------------------------------------------------
+# Chat standalone mode (args parsing)
+# ---------------------------------------------------------------------------
+
+
+class TestChatStandalone:
+    def test_chat_standalone_quit(self, tmp_path):
+        """Test that --standalone mode starts and handles /quit."""
+        env_code = f"""
+import sys; sys.argv = ['chat', '--standalone']
+import mahaclaw.llm as llm_mod
+# Mock is_available to avoid network call
+llm_mod.is_available = lambda config=None: (False, "test mock")
+from mahaclaw.chat import main; raise SystemExit(main())
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", env_code],
+            input="/status\n/quit\n",
+            capture_output=True, text=True, timeout=10,
+        )
+        assert result.returncode == 0, result.stderr
+        assert "standalone" in result.stdout.lower()
+        assert "bye" in result.stdout
+
+    def test_chat_mode_switch(self, tmp_path):
+        """Test switching from federation to standalone and back."""
+        outbox = tmp_path / "nadi_outbox.json"
+        outbox.write_text("[]\n")
+
+        env_code = f"""
+import sys; sys.argv = ['chat', '--target', 'agent-research', '--nowait']
+import mahaclaw.envelope as m; m.OUTBOX_PATH = __import__('pathlib').Path('{outbox}')
+import mahaclaw.llm as llm_mod
+llm_mod.is_available = lambda config=None: (False, "test mock")
+from mahaclaw.chat import main; raise SystemExit(main())
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", env_code],
+            input="/standalone\n/status\n/federation\n/status\n/quit\n",
+            capture_output=True, text=True, timeout=10,
+        )
+        assert result.returncode == 0, result.stderr
+        assert "standalone" in result.stdout.lower()
+        assert "federation" in result.stdout.lower()
+        assert "bye" in result.stdout
