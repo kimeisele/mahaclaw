@@ -102,11 +102,19 @@ python -m pytest tests/test_mahaclaw.py -q
 # Daemon mode (Unix socket)
 python -m mahaclaw.daemon
 
+# Gateway mode (WebSocket on :18789, replaces OpenClaw Gateway)
+python -m mahaclaw.gateway
+python -m mahaclaw.gateway --port 18789 --host 127.0.0.1
+
 # CLI mode (pipe from OpenClaw skill)
 echo '{"intent":"inquiry","target":"agent-research","payload":{"q":"test"}}' | python -m mahaclaw.cli
 
 # CLI with response wait (blocks up to 10s for federation reply)
 echo '{"intent":"inquiry","target":"agent-research","payload":{"q":"test"}}' | python -m mahaclaw.cli --wait 10
+
+# Standalone chat (no OpenClaw needed)
+python -m mahaclaw.chat
+python -m mahaclaw.chat --target agent-research --wait 30
 
 # Socket client
 echo '{"intent":"inquiry","target":"agent-research"}' | \
@@ -128,9 +136,17 @@ mahaclaw/
   envelope.py           Gate 5 SYNC
   inbox.py              Return loop — poll nadi_inbox.json for responses
   daemon.py             asyncio Unix socket server
+  gateway.py            WebSocket gateway (port 18789, stdlib RFC 6455)
+  session.py            Session manager (SQLite signed ledger)
   cli.py                stdin/pipe entry point for OpenClaw skills
   chat.py               standalone terminal chat (no OpenClaw needed)
   __main__.py           python -m mahaclaw.cli alias
+  skills/
+    _types.py           Shared types (SkillMetadata, SkillContext, SkillResult)
+    engine.py           Skill discovery, loading, dispatch
+    compat.py           OpenClaw SKILL.md parser
+  tools/
+    sandbox.py          Allowlist shell + scoped filesystem
 
 openclaw_skill/
   SKILL.md              OpenClaw skill definition (install in any workspace)
@@ -139,7 +155,7 @@ openclaw_skill/
     federation-relay.sh command:new hook for automatic forwarding
 
 tests/
-  test_mahaclaw.py      39 tests (gates + inbox + CLI + chat + e2e + socket)
+  test_mahaclaw.py      64 tests (gates + inbox + CLI + chat + session + skills + sandbox + gateway)
   integration/
     mock_openclaw.js    Node.js mock gateway (44 integration tests)
 

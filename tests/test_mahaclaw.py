@@ -542,3 +542,282 @@ from mahaclaw.chat import main; raise SystemExit(main())
         assert len(data) == 1
         assert data[0]["payload"]["message"] == "hello federation"
         assert data[0]["target_city_id"] == "kimeisele/agent-research"
+
+
+# ---------------------------------------------------------------------------
+# Session Manager (signed ledger)
+# ---------------------------------------------------------------------------
+
+from mahaclaw.session import SessionManager
+
+
+class TestSessionManager:
+    def test_create_session(self, tmp_path):
+        mgr = SessionManager(tmp_path / "test.db")
+        s = mgr.get_or_create("test:telegram:user1")
+        assert s.session_id == "test:telegram:user1"
+        assert s.message_count == 0
+        mgr.close()
+
+    def test_get_existing_session(self, tmp_path):
+        mgr = SessionManager(tmp_path / "test.db")
+        s1 = mgr.get_or_create("test:sess:1", target="agent-city")
+        s2 = mgr.get_or_create("test:sess:1")
+        assert s2.target == "agent-city"
+        mgr.close()
+
+    def test_ledger_chain_integrity(self, tmp_path):
+        mgr = SessionManager(tmp_path / "test.db")
+        sid = "test:chain:1"
+        mgr.get_or_create(sid)
+        mgr.log_message_in(sid, "hello")
+        mgr.log_message_out(sid, "env_abc", "corr_123", "agent-research", "jala", "research")
+        mgr.log_message_in(sid, "second message")
+
+        valid, count = mgr.verify_chain(sid)
+        assert valid is True
+        assert count == 4  # genesis + 3 entries
+        mgr.close()
+
+    def test_ledger_tamper_detection(self, tmp_path):
+        mgr = SessionManager(tmp_path / "test.db")
+        sid = "test:tamper:1"
+        mgr.get_or_create(sid)
+        mgr.log_message_in(sid, "original")
+
+        # Tamper with a row
+        mgr._conn.execute(
+            "UPDATE session_ledger SET data = '{\"message\":\"tampered\"}' WHERE session_id = ? AND seq = 2",
+            (sid,),
+        )
+        mgr._conn.commit()
+
+        valid, at_seq = mgr.verify_chain(sid)
+        assert valid is False
+        mgr.close()
+
+    def test_history_retrieval(self, tmp_path):
+        mgr = SessionManager(tmp_path / "test.db")
+        sid = "test:hist:1"
+        mgr.get_or_create(sid)
+        mgr.log_message_in(sid, "msg1")
+        mgr.log_message_in(sid, "msg2")
+
+        history = mgr.get_history(sid)
+        assert len(history) == 3  # genesis + 2 messages
+        assert history[1].kind == "message_in"
+        assert json.loads(json.dumps(history[1].data))["message"] == "msg1"
+        mgr.close()
+
+    def test_list_sessions(self, tmp_path):
+        mgr = SessionManager(tmp_path / "test.db")
+        mgr.get_or_create("sess:a")
+        mgr.get_or_create("sess:b")
+        sessions = mgr.list_sessions()
+        assert len(sessions) == 2
+        mgr.close()
+
+
+# ---------------------------------------------------------------------------
+# Skill Engine
+# ---------------------------------------------------------------------------
+
+from mahaclaw.skills.engine import SkillEngine
+from mahaclaw.skills._types import SkillContext, SkillResult, SkillMetadata
+from mahaclaw.skills.compat import parse_skill_md
+
+
+class TestSkillEngine:
+    def test_register_and_run(self):
+        engine = SkillEngine()
+
+        def echo_skill(ctx: SkillContext) -> SkillResult:
+            return SkillResult(ok=True, output=f"echo: {ctx.message}")
+
+        engine.register("echo", echo_skill)
+        assert engine.skill_count == 1
+
+        result = engine.run("echo", SkillContext(message="hello", session_id="s1", target="t1"))
+        assert result.ok is True
+        assert result.output == "echo: hello"
+
+    def test_run_unknown_skill(self):
+        engine = SkillEngine()
+        result = engine.run("nonexistent", SkillContext(message="x", session_id="s1", target="t1"))
+        assert result.ok is False
+        assert "not found" in result.error or "no runner" in result.error
+
+    def test_match_slash_command(self):
+        engine = SkillEngine()
+        engine.register("test", lambda ctx: SkillResult(ok=True))
+        assert engine.match_skill("/test hello") == "test"
+        assert engine.match_skill("regular message") is None
+
+    def test_discover_python_skills(self, tmp_path):
+        skill_dir = tmp_path / "skills"
+        skill_dir.mkdir()
+        (skill_dir / "greet.py").write_text(
+            'METADATA = {"name": "greet", "description": "A greeting skill"}\n'
+            'def run(ctx):\n'
+            '    from mahaclaw.skills.engine import SkillResult\n'
+            '    return SkillResult(ok=True, output=f"Hello {ctx.message}")\n'
+        )
+
+        engine = SkillEngine()
+        count = engine.discover_python(skill_dir)
+        assert count == 1
+        assert engine.get_skill("greet") is not None
+
+    def test_parse_our_skill_md(self):
+        skill_path = Path(__file__).resolve().parents[1] / "openclaw_skill" / "SKILL.md"
+        meta = parse_skill_md(skill_path)
+        assert meta is not None
+        assert meta.name == "federation-bridge"
+        assert meta.user_invocable is True
+        assert "python3" in meta.requires_bins
+        assert meta.kind == "skillmd"
+
+
+# ---------------------------------------------------------------------------
+# Tool Sandbox
+# ---------------------------------------------------------------------------
+
+from mahaclaw.tools.sandbox import ToolSandbox
+
+
+class TestToolSandbox:
+    def test_run_allowed_command(self, tmp_path):
+        sandbox = ToolSandbox(workspace=tmp_path)
+        result = sandbox.run("echo hello world")
+        assert result.ok is True
+        assert "hello world" in result.stdout
+
+    def test_block_dangerous_command(self, tmp_path):
+        sandbox = ToolSandbox(workspace=tmp_path)
+        result = sandbox.run("rm -rf /")
+        assert result.ok is False
+        assert "blocked" in result.error
+
+    def test_block_unlisted_command(self, tmp_path):
+        sandbox = ToolSandbox(workspace=tmp_path)
+        result = sandbox.run("wget http://evil.com")
+        assert result.ok is False
+        assert "allowlist" in result.error
+
+    def test_block_shell_metacharacters(self, tmp_path):
+        sandbox = ToolSandbox(workspace=tmp_path)
+        result = sandbox.run("echo hello; rm -rf /")
+        assert result.ok is False
+        assert "blocked character" in result.error
+
+    def test_path_escape_prevention(self, tmp_path):
+        sandbox = ToolSandbox(workspace=tmp_path)
+        ok, reason = sandbox.validate_path("../../etc/passwd")
+        assert ok is False
+        assert "escapes" in reason
+
+    def test_read_file_in_scope(self, tmp_path):
+        sandbox = ToolSandbox(workspace=tmp_path)
+        (tmp_path / "test.txt").write_text("hello")
+        ok, content = sandbox.read_file("test.txt")
+        assert ok is True
+        assert content == "hello"
+
+    def test_write_file_in_scope(self, tmp_path):
+        sandbox = ToolSandbox(workspace=tmp_path)
+        ok, msg = sandbox.write_file("output.txt", "test content")
+        assert ok is True
+        assert (tmp_path / "output.txt").read_text() == "test content"
+
+    def test_list_dir(self, tmp_path):
+        sandbox = ToolSandbox(workspace=tmp_path)
+        (tmp_path / "a.txt").write_text("a")
+        (tmp_path / "b.txt").write_text("b")
+        ok, entries = sandbox.list_dir()
+        assert ok is True
+        assert "a.txt" in entries
+        assert "b.txt" in entries
+
+    def test_command_timeout(self, tmp_path):
+        # Write a script that sleeps, avoid shell metacharacters
+        script = tmp_path / "sleeper.py"
+        script.write_text("import time\ntime.sleep(10)\n")
+        sandbox = ToolSandbox(workspace=tmp_path, timeout_s=1)
+        result = sandbox.run(f"python3 {script}")
+        assert result.ok is False
+        assert "timeout" in result.error
+
+
+# ---------------------------------------------------------------------------
+# Gateway WebSocket (basic connectivity)
+# ---------------------------------------------------------------------------
+
+from mahaclaw.gateway import _ws_accept_key, _ws_frame, _ws_read_frame, _process_message
+
+
+class TestGateway:
+    def test_ws_accept_key(self):
+        key = _ws_accept_key(b"dGhlIHNhbXBsZSBub25jZQ==")
+        assert key == "7ZaunlI/AuSFdL5rz2ebhN0QS2U="
+        # Deterministic: same input → same output
+        assert _ws_accept_key(b"dGhlIHNhbXBsZSBub25jZQ==") == key
+
+    def test_ws_frame_roundtrip(self):
+        payload = b'{"ok":true}'
+        frame = _ws_frame(payload)
+        assert frame[0] == 0x81  # FIN + TEXT
+        assert payload in frame
+
+    @pytest.mark.asyncio
+    async def test_process_message_intent(self, tmp_path, monkeypatch):
+        import mahaclaw.envelope as env_mod
+        outbox = tmp_path / "nadi_outbox.json"
+        outbox.write_text("[]\n")
+        monkeypatch.setattr(env_mod, "OUTBOX_PATH", outbox)
+
+        from mahaclaw.lotus import reload
+        reload()
+
+        result = await _process_message('{"intent":"inquiry","target":"agent-research","wait":0}')
+        assert result["ok"] is True
+        assert result["element"] == "jala"
+
+    @pytest.mark.asyncio
+    async def test_process_message_chat(self, tmp_path, monkeypatch):
+        import mahaclaw.envelope as env_mod
+        outbox = tmp_path / "nadi_outbox.json"
+        outbox.write_text("[]\n")
+        monkeypatch.setattr(env_mod, "OUTBOX_PATH", outbox)
+
+        from mahaclaw.lotus import reload
+        reload()
+
+        result = await _process_message('{"message":"What is dark matter?","target":"agent-research","wait":0}')
+        assert result["ok"] is True
+        assert result["element"] == "jala"
+
+    @pytest.mark.asyncio
+    async def test_gateway_http_health(self, tmp_path, monkeypatch):
+        """Connect with plain HTTP (no WS upgrade) — should get health response."""
+        import mahaclaw.envelope as env_mod
+        outbox = tmp_path / "nadi_outbox.json"
+        outbox.write_text("[]\n")
+        monkeypatch.setattr(env_mod, "OUTBOX_PATH", outbox)
+
+        from mahaclaw.gateway import handle_ws_client
+
+        server = await asyncio.start_server(handle_ws_client, "127.0.0.1", 0)
+        port = server.sockets[0].getsockname()[1]
+
+        try:
+            reader, writer = await asyncio.open_connection("127.0.0.1", port)
+            writer.write(b"GET /health HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            await writer.drain()
+            resp = await asyncio.wait_for(reader.read(4096), timeout=5.0)
+            assert b"200 OK" in resp
+            assert b"mahaclaw-gateway" in resp
+            writer.close()
+            await writer.wait_closed()
+        finally:
+            server.close()
+            await server.wait_closed()
