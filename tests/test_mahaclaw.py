@@ -285,8 +285,9 @@ class TestFullPipeline:
         route = resolve_route(intent, rama)
         assert "agent-research" in route["target_city_id"]
         # Gate 5
-        eid = build_and_enqueue(intent, rama, route)
+        eid, cid = build_and_enqueue(intent, rama, route)
         assert eid.startswith("env_")
+        assert len(cid) > 0
 
         # Verify outbox
         data = json.loads(outbox.read_text())
@@ -367,6 +368,7 @@ from mahaclaw.cli import main; raise SystemExit(main())
         resp = json.loads(result.stdout)
         assert resp["ok"] is True
         assert resp["envelope_id"].startswith("env_")
+        assert "correlation_id" in resp
         assert resp["element"] == "vayu"
         assert resp["guardian"] == "vyasa"
 
@@ -378,3 +380,120 @@ from mahaclaw.cli import main; raise SystemExit(main())
         assert result.returncode == 1
         resp = json.loads(result.stdout)
         assert resp["ok"] is False
+
+
+# ---------------------------------------------------------------------------
+# Inbox / Return Loop
+# ---------------------------------------------------------------------------
+
+from mahaclaw.inbox import poll_response, extract_response_payload, _read_inbox
+
+
+class TestInbox:
+    def test_poll_finds_matching_response(self, tmp_path):
+        inbox = tmp_path / "nadi_inbox.json"
+        corr_id = "test-corr-001"
+        inbox.write_text(json.dumps([
+            {"correlation_id": corr_id, "source": "agent-research",
+             "payload": {"answer": "42"}, "operation": "inquiry_response",
+             "nadi_type": "apana", "source_city_id": "kimeisele/agent-research"},
+        ]) + "\n")
+
+        result = poll_response(corr_id, timeout_s=0.5, inbox_path=inbox)
+        assert result is not None
+        assert result["correlation_id"] == corr_id
+        assert result["payload"]["answer"] == "42"
+
+        # Consumed — inbox should be empty
+        remaining = _read_inbox(inbox)
+        assert len(remaining) == 0
+
+    def test_poll_timeout_returns_none(self, tmp_path):
+        inbox = tmp_path / "nadi_inbox.json"
+        inbox.write_text("[]\n")
+        result = poll_response("nonexistent", timeout_s=0.3, inbox_path=inbox)
+        assert result is None
+
+    def test_poll_leaves_other_messages(self, tmp_path):
+        inbox = tmp_path / "nadi_inbox.json"
+        inbox.write_text(json.dumps([
+            {"correlation_id": "other-1", "payload": {}},
+            {"correlation_id": "target-2", "payload": {"x": 1}},
+            {"correlation_id": "other-3", "payload": {}},
+        ]) + "\n")
+
+        result = poll_response("target-2", timeout_s=0.5, inbox_path=inbox)
+        assert result is not None
+        remaining = _read_inbox(inbox)
+        assert len(remaining) == 2
+        assert remaining[0]["correlation_id"] == "other-1"
+        assert remaining[1]["correlation_id"] == "other-3"
+
+    def test_poll_no_inbox_file(self, tmp_path):
+        inbox = tmp_path / "does_not_exist.json"
+        result = poll_response("x", timeout_s=0.3, inbox_path=inbox)
+        assert result is None
+
+    def test_extract_response_payload(self):
+        env = {
+            "source": "agent-research",
+            "source_city_id": "kimeisele/agent-research",
+            "operation": "inquiry_response",
+            "nadi_type": "apana",
+            "payload": {"answer": "42", "_rama": {"element": "jala"}, "_source_intent": "inquiry"},
+        }
+        extracted = extract_response_payload(env)
+        assert extracted["source"] == "agent-research"
+        assert extracted["data"] == {"answer": "42"}
+        # Internal keys filtered
+        assert "_rama" not in extracted["data"]
+        assert "_source_intent" not in extracted["data"]
+
+    def test_cli_wait_with_response(self, tmp_path):
+        outbox = tmp_path / "nadi_outbox.json"
+        outbox.write_text("[]\n")
+        inbox = tmp_path / "nadi_inbox.json"
+
+        # We need to write a response *after* the CLI writes the outbox.
+        # Strategy: pre-populate inbox with the correlation_id we'll get.
+        # Since correlation_id is random, we use a helper script that:
+        # 1. Runs the pipeline
+        # 2. Reads the outbox to get correlation_id
+        # 3. Writes a fake response to inbox
+        # 4. Polls
+        env_code = f"""
+import json, pathlib
+import mahaclaw.envelope as m
+import mahaclaw.inbox as ib
+m.OUTBOX_PATH = pathlib.Path('{outbox}')
+ib.INBOX_PATH = pathlib.Path('{inbox}')
+
+from mahaclaw.intercept import parse_intent
+from mahaclaw.tattva import classify
+from mahaclaw.rama import encode_rama
+from mahaclaw.lotus import resolve_route
+
+intent = parse_intent('{{"intent":"inquiry","target":"agent-research"}}')
+tattva = classify(intent)
+rama = encode_rama(intent, tattva)
+route = resolve_route(intent, rama)
+eid, cid = m.build_and_enqueue(intent, rama, route)
+
+# Simulate federation response arriving
+inbox_data = [{{"correlation_id": cid, "source": "agent-research",
+    "source_city_id": "kimeisele/agent-research", "operation": "inquiry_response",
+    "nadi_type": "apana", "payload": {{"answer": "dark matter is cool"}}}}]
+pathlib.Path('{inbox}').write_text(json.dumps(inbox_data))
+
+resp = ib.poll_response(cid, timeout_s=1.0)
+assert resp is not None
+assert resp["payload"]["answer"] == "dark matter is cool"
+print(json.dumps({{"ok": True, "cid": cid}}))
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", env_code],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 0, result.stderr
+        resp = json.loads(result.stdout)
+        assert resp["ok"] is True

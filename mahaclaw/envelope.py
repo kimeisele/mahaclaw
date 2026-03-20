@@ -94,10 +94,13 @@ def build_envelope(intent: dict, rama: RAMASignal, route: dict) -> dict:
     }
 
 
-def build_and_enqueue(intent: dict, rama: RAMASignal, route: dict) -> str:
-    """Build envelope and append to outbox.  Returns the envelope_id."""
+def build_and_enqueue(intent: dict, rama: RAMASignal, route: dict) -> tuple[str, str]:
+    """Build envelope and append to outbox.
+
+    Returns (envelope_id, correlation_id).
+    """
     envelope = build_envelope(intent, rama, route)
     outbox = _read_outbox()
     outbox.append(envelope)
     _write_outbox(outbox)
-    return envelope["envelope_id"]
+    return envelope["envelope_id"], envelope["correlation_id"]
