@@ -4,3 +4,4 @@ __pycache__/
 .federation/
 .federation-setup.json
 .agent-internet/
+.mahaclaw/
