@@ -35,9 +35,8 @@ Two implementations in steward-protocol:
 - **steward**: `steward/buddhi.py` → `Buddhi` — phase-machine ORIENT→EXECUTE→VERIFY→COMPLETE, `BuddhiDirective`/`BuddhiVerdict`, token budget control
 - **agent-city**: `city/gateway.py` → calls `get_buddhi()`, `city/council.py` → governance proposals, `city/brain.py` → `Brain` (deliberative, reads but does NOT act)
 - **agent-city**: `city/immune.py` → `CytokineBreaker` — circuit breaker aborts healing if test failures increase
-- **Maha Claw**: ❌ NOT WIRED. Pipeline has no Buddhi gate. Every intent passes through unchecked.
-- **Wire**: Import `MahaBuddhi.think()` or reimplement verdict logic. Add gate between VALIDATE and EXECUTE.
-- **Status**: ✅ Working in steward + steward-protocol. ❌ Missing in Maha Claw.
+- **Maha Claw**: ✅ WIRED. `mahaclaw/buddhi.py` → `Buddhi` class — Antahkarana coordinator. Owns Manas, Chitta, Gandha, HebbianSynaptic. `pre_flight()` → `BuddhiDirective` (tools, tier, max_tokens, phase). `evaluate()` → `BuddhiVerdict`. Phase-aware tool selection (ORIENT=read-only, EXECUTE=full, VERIFY=no-writes, COMPLETE=observe). 5-layer tier cascade: action→Hebbian→guardian→phase→context. DSP signal chain for token budget. Narasimha kill-switch extracted to `mahaclaw/narasimha.py`.
+- **Status**: ✅ Working in steward + steward-protocol + Maha Claw.
 
 ## 4. Ahamkara (अहंकार) — Ego / Identity / Crypto Signing
 
@@ -146,8 +145,8 @@ Two implementations in steward-protocol:
 - **steward**: `steward/senses/health_sense.py` → `HealthSense` — file metrics, code entropy
 - **steward-protocol**: `cortex/jnana.py` → `JnanaHandler` — knowledge pattern detection
 - **steward**: Narasimha kill-switch in `steward/loop/tool_dispatch.py:check_tool_gates()` Gate 2 → `NarasimhaProtocol.audit_agent()`, `ThreatLevel` GREEN→APOCALYPSE, blocks at RED+
-- **Maha Claw**: ❌ No anomaly detection, no Narasimha
-- **Wire**: Import Narasimha threat assessment for tool sandbox
+- **Maha Claw**: ✅ WIRED. `mahaclaw/narasimha.py` → `gate()` → `NarasimhaVerdict`. String blocklist kill-switch. Runs BEFORE Buddhi. Blocks dangerous intents/substrings.
+- **Status**: ✅ Working. Extracted from buddhi.py as philosophically correct separation.
 - **Status**: ✅ steward. ❌ Missing in Maha Claw.
 
 ---
@@ -277,14 +276,14 @@ Two implementations in steward-protocol:
 
 | Element | Status in Maha Claw | Priority | Action |
 |---------|-------------------|----------|--------|
-| **Buddhi** | ❌ Missing | **P0** | Add safety gate to pipeline |
+| **Buddhi** | ✅ WIRED | **P0** | Antahkarana coordinator with Hebbian learning |
 | **Ahamkara** | ❌ Missing | **P0** | Add ECDSA envelope signing |
 | **Manas** | ✅ Wired | ~~P1~~ | Seed-based routing, verified compat |
 | **Gandha** | ✅ Wired | ~~P1~~ | Pattern detection in chitta.py |
 | **Pani** | ✅ Wired | ~~P1~~ | Tool dispatch pipeline |
 | **Payu** | ❌ Missing | **P2** | Add outbox rotation + session expiry |
 | **Rasa** | ❌ Missing | **P2** | Add trust/auth validation |
-| **Narasimha** | ⚠️ Proto | **P2** | Formalize threat levels |
+| **Narasimha** | ✅ WIRED | **P2** | Kill-switch extracted from Buddhi |
 | **Chitta** | ✅ Wired | ~~P2~~ | Impression model + phase derivation |
 | **Vedana** | ❌ Missing | **P3** | Add health pulse |
 | **KsetraJna** | ⚠️ Proto | **P3** | Expand buddy_bubble |

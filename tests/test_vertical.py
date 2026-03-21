@@ -326,10 +326,11 @@ class TestVerticalFlow:
         assert len(chitta.impressions) == 3
 
     def test_buddhi_blocks_dangerous_intent(self):
-        """Buddhi ABORT prevents the rest of the pipeline from executing."""
+        """Narasimha ABORT prevents the rest of the pipeline from executing."""
 
         from mahaclaw.intercept import parse_intent
         from mahaclaw.buddhi import check_intent, VerdictAction
+        from mahaclaw.narasimha import gate as narasimha_gate
 
         intent = parse_intent(json.dumps({
             "intent": "rm -rf everything",
@@ -337,7 +338,83 @@ class TestVerticalFlow:
             "payload": {},
         }))
 
+        # Narasimha blocks BEFORE Buddhi
+        nv = narasimha_gate(intent)
+        assert nv.blocked is True
+        assert "rm -rf" in nv.reason
+
+        # check_intent delegates to Narasimha first
         verdict = check_intent(intent)
         assert verdict.action == VerdictAction.ABORT
-        assert "dangerous" in verdict.reason or "rm -rf" in verdict.reason
+        assert "rm -rf" in verdict.reason
         # Pipeline STOPS here. No Tattva, no RAMA, no envelope.
+
+    def test_antahkarana_full_flow(self):
+        """Full Antahkarana coordination: Buddhi owns Manas, Chitta, Gandha.
+
+        This test proves the organism has a BRAIN, not just organs.
+        Buddhi (intellect) coordinates all four Antahkarana components
+        as ONE cognitive unit — without any LLM involvement.
+        """
+        from mahaclaw.buddhi import (
+            Buddhi, BuddhiDirective, ModelTier, VerdictAction,
+        )
+        from mahaclaw.chitta import ExecutionPhase
+        from mahaclaw.manas import ActionType, IntentGuna
+        from mahaclaw.narasimha import gate as narasimha_gate
+
+        raw_text = "research quantum computing applications"
+
+        # === NARASIMHA: Kill-switch clears first ===
+        nv = narasimha_gate({"intent": raw_text})
+        assert nv.blocked is False
+
+        # === BUDDHI: Antahkarana coordinator ===
+        buddhi = Buddhi()
+
+        # --- Pre-flight round 0: Manas perceives, Buddhi decides ---
+        directive = buddhi.pre_flight(raw_text, round_num=0)
+
+        # Manas perceived correctly (cached in Buddhi)
+        assert buddhi.perception is not None
+        assert buddhi.perception.action == ActionType.IMPLEMENT
+        assert buddhi.perception.guna == IntentGuna.RAJAS
+
+        # ORIENT phase: Buddhi restricts to read-only
+        assert directive.phase == ExecutionPhase.ORIENT
+        assert "read_file" in directive.allowed_tools
+        assert "write_file" not in directive.allowed_tools  # Viveka: no writes in ORIENT
+
+        # Tier is deterministic
+        assert directive.tier in (ModelTier.FLASH, ModelTier.STANDARD, ModelTier.PRO)
+
+        # DSP signal: max_tokens computed
+        assert directive.max_tokens > 0
+
+        # --- Simulate tool execution: read files ---
+        v1 = buddhi.evaluate([("read_file", 1, True, "", "/main.py")])
+        # CONTINUE or REFLECT (phase transition guidance)
+        assert v1.action in (VerdictAction.CONTINUE, VerdictAction.REFLECT)
+
+        v2 = buddhi.evaluate([("read_file", 2, True, "", "/lib.py")])
+        assert v2.action in (VerdictAction.CONTINUE, VerdictAction.REFLECT)
+
+        # --- Pre-flight round 1: Phase advanced to EXECUTE ---
+        d2 = buddhi.pre_flight(raw_text, round_num=1)
+        assert d2.phase == ExecutionPhase.EXECUTE
+        assert "write_file" in d2.allowed_tools  # NOW writes are allowed
+
+        # Hebbian learning tracked
+        assert buddhi.synaptic.weight("read_file") > 0.5  # successes
+
+        # --- Simulate write + verify ---
+        v3 = buddhi.evaluate([("write_file", 3, True, "", "/main.py")])
+        # /main.py was read → no blind write
+        assert v3.action in (VerdictAction.CONTINUE, VerdictAction.REFLECT)
+
+        # --- End turn: Chitta persists cross-turn state ---
+        summary = buddhi.chitta_summary()
+        assert "/main.py" in summary["prior_reads"] or "/lib.py" in summary["prior_reads"]
+        buddhi.end_turn()
+        assert len(buddhi.chitta.impressions) == 0
+        assert buddhi.chitta.prior_reads  # prior_reads preserved
