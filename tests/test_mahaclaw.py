@@ -1304,8 +1304,12 @@ class TestStewardOnlyBridge:
 # ---------------------------------------------------------------------------
 
 from mahaclaw.buddhi import (
-    VerdictAction, BuddhiVerdict, Impression, Chitta,
-    check_intent, detect_patterns,
+    VerdictAction, BuddhiVerdict,
+    check_intent, evaluate,
+)
+from mahaclaw.chitta import (
+    Impression, Chitta,
+    detect_patterns,
 )
 
 
@@ -1351,49 +1355,64 @@ class TestGandhaDetection:
         assert detect_patterns([]) is None
 
     def test_consecutive_errors_aborts(self):
-        imps = [Impression(name="bash", success=False, error="fail") for _ in range(5)]
-        v = detect_patterns(imps)
-        assert v is not None
-        assert v.action == VerdictAction.ABORT
+        imps = [Impression(name="bash", params_hash=i, success=False, error="fail") for i in range(5)]
+        d = detect_patterns(imps)
+        assert d is not None
+        assert d.severity == VerdictAction.ABORT
 
     def test_identical_calls_reflects(self):
-        imps = [Impression(name="bash", params_hash=42, success=False) for _ in range(3)]
-        v = detect_patterns(imps)
-        assert v is not None
-        assert v.action in (VerdictAction.REFLECT, VerdictAction.ABORT)
+        imps = [Impression(name="bash", params_hash=42, success=False, error="fail") for _ in range(3)]
+        d = detect_patterns(imps)
+        assert d is not None
+        assert d.severity in (VerdictAction.REFLECT, VerdictAction.ABORT)
 
     def test_blind_write_redirects(self):
-        imps = [Impression(name="edit_file", path="/foo.py", success=True)]
-        v = detect_patterns(imps, prior_reads=frozenset())
-        assert v is not None
-        assert v.action == VerdictAction.REDIRECT
+        imps = [Impression(name="write_file", params_hash=0, success=True, path="/foo.py")]
+        d = detect_patterns(imps, prior_reads=frozenset())
+        assert d is not None
+        assert d.severity == VerdictAction.REDIRECT
 
     def test_write_after_read_ok(self):
-        imps = [Impression(name="edit_file", path="/foo.py", success=True)]
-        v = detect_patterns(imps, prior_reads=frozenset({"/foo.py"}))
-        assert v is None
+        imps = [Impression(name="write_file", params_hash=0, success=True, path="/foo.py")]
+        d = detect_patterns(imps, prior_reads=frozenset({"/foo.py"}))
+        assert d is None
 
     def test_high_error_ratio_reflects(self):
-        imps = [Impression(name=f"t{i}", success=(i == 0)) for i in range(5)]
-        v = detect_patterns(imps)
-        assert v is not None
-        assert v.action == VerdictAction.REFLECT
+        # 7 calls, 5 errors (71%), interleaved to avoid consecutive_errors
+        imps = [
+            Impression(name="bash", params_hash=0, success=False, error="e"),
+            Impression(name="read_file", params_hash=1, success=True, path="/a"),
+            Impression(name="write_file", params_hash=2, success=False, error="e"),
+            Impression(name="bash", params_hash=3, success=False, error="e"),
+            Impression(name="read_file", params_hash=4, success=True, path="/b"),
+            Impression(name="write_file", params_hash=5, success=False, error="e"),
+            Impression(name="bash", params_hash=6, success=False, error="e"),
+        ]
+        d = detect_patterns(imps)
+        assert d is not None
+        assert d.severity == VerdictAction.REFLECT
 
 
-class TestChitta:
-    def test_record_and_evaluate(self):
+class TestBuddhiEvaluate:
+    def test_evaluate_clean_chitta(self):
         c = Chitta()
-        c.record(Impression(name="read_file", path="/x.py", success=True))
-        assert "/x.py" in c.prior_reads
-        v = c.evaluate()
+        c.record("read_file", 1, True, path="/x.py")
+        v = evaluate(c)
         assert v.action == VerdictAction.CONTINUE
 
-    def test_clear_preserves_prior_reads(self):
+    def test_evaluate_detects_blind_write(self):
         c = Chitta()
-        c.record(Impression(name="read_file", path="/x.py", success=True))
-        c.clear()
-        assert "/x.py" in c.prior_reads
-        assert len(c.impressions) == 0
+        c.record("write_file", 1, True, path="/y.py")
+        v = evaluate(c)
+        assert v.action == VerdictAction.REDIRECT
+
+    def test_evaluate_with_prior_read(self):
+        c = Chitta()
+        c.record("read_file", 1, True, path="/z.py")
+        c.end_turn()
+        c.record("write_file", 2, True, path="/z.py")
+        v = evaluate(c)
+        assert v.action == VerdictAction.CONTINUE
 
 
 # ---------------------------------------------------------------------------
