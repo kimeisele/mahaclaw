@@ -85,19 +85,19 @@ class TestTattvaGate:
         assert r2.dominant in ELEMENTS
 
     def test_heartbeat_seed_routing(self):
-        """heartbeat hashes to position 10 → karma → DEBUG → engineering."""
+        """heartbeat → pos 8 → karma → DEBUG → engineering (verified vs steward)."""
         result = classify({"intent": "heartbeat", "target": "agent-city"})
         assert result.dominant == "prithvi"
         assert result.zone == "engineering"
 
     def test_inquiry_seed_routing(self):
-        """inquiry hashes to position 5 → dharma → REVIEW → governance."""
+        """inquiry → pos 14 → moksha → RESEARCH → research (verified vs steward)."""
         result = classify({"intent": "inquiry", "target": "agent-research"})
-        assert result.dominant == "agni"
-        assert result.zone == "governance"
+        assert result.dominant == "jala"
+        assert result.zone == "research"
 
     def test_code_analysis_seed_routing(self):
-        """code_analysis hashes to position 11 → karma → DEBUG → engineering."""
+        """code_analysis → pos 2 → genesis → IMPLEMENT → engineering (verified vs steward)."""
         result = classify({"intent": "code_analysis", "target": "steward"})
         assert result.dominant == "prithvi"
         assert result.zone == "engineering"
@@ -139,17 +139,17 @@ class TestRamaGate:
         assert set(d.keys()) == {"element", "zone", "operation", "affinity", "guardian", "quarter", "guna", "position"}
 
     def test_inquiry_seed_position(self):
-        """inquiry hashes to position 5 → kumaras (dharma quarter)."""
+        """inquiry → pos 14 → shuka (moksha quarter). Verified vs steward."""
         r = self._make("inquiry")
-        assert r.position == 5
-        assert r.guardian == GUARDIANS[5]  # kumaras
-        assert r.quarter == "dharma"
+        assert r.position == 14
+        assert r.guardian == GUARDIANS[14]  # shuka
+        assert r.quarter == "moksha"
 
     def test_heartbeat_seed_position(self):
-        """heartbeat hashes to position 10 → janaka (karma quarter)."""
+        """heartbeat → pos 8 → parashurama (karma quarter). Verified vs steward."""
         r = self._make("heartbeat")
-        assert r.position == 10
-        assert r.guardian == GUARDIANS[10]  # janaka
+        assert r.position == 8
+        assert r.guardian == GUARDIANS[8]  # parashurama
         assert r.quarter == "karma"
 
     def test_parampara_vector(self):
@@ -1498,10 +1498,10 @@ class TestManaSeedPipeline:
 
     def test_position_in_range(self):
         """Position is always 0-15."""
-        from mahaclaw.manas import _compute_seed, _seed_to_position
+        from mahaclaw.manas import _compute_seed, _synth_transform, WORDS
         for text in ("a", "abc", "inquiry", "heartbeat", "xyzzy", "test_long_string_here"):
             seed = _compute_seed(text)
-            pos = _seed_to_position(seed)
+            pos = _synth_transform(seed) % WORDS
             assert 0 <= pos < 16, f"{text} → pos {pos}"
 
     def test_perceive_returns_all_fields(self):
@@ -1521,17 +1521,17 @@ class TestManaSeedPipeline:
         assert p1 == p2
 
     def test_guna_from_position(self):
-        """Guna is derived from position via opcode sets."""
+        """Guna is derived from quarter (seed % WORDS // QUARTERS)."""
         from mahaclaw.manas import _position_to_guna, IntentGuna
-        from mahaclaw.manas import SATTVA_POSITIONS, TAMAS_POSITIONS, RAJAS_POSITIONS
-        for pos in range(16):
-            g = _position_to_guna(pos)
-            if pos in SATTVA_POSITIONS:
-                assert g == IntentGuna.SATTVA
-            elif pos in TAMAS_POSITIONS:
-                assert g == IntentGuna.TAMAS
-            else:
-                assert g == IntentGuna.RAJAS
+        # Quarter 0 (pos 0-3) = TAMAS, Q1 (4-7) = RAJAS, Q2 (8-11) = SATTVA, Q3 (12-15) = SUDDHA
+        for pos in range(4):
+            assert _position_to_guna(pos) == IntentGuna.TAMAS
+        for pos in range(4, 8):
+            assert _position_to_guna(pos) == IntentGuna.RAJAS
+        for pos in range(8, 12):
+            assert _position_to_guna(pos) == IntentGuna.SATTVA
+        for pos in range(12, 16):
+            assert _position_to_guna(pos) == IntentGuna.SUDDHA
 
     def test_function_from_position(self):
         """Function is derived from HARE/KRISHNA/RAMA position sets."""
@@ -1572,14 +1572,14 @@ class TestManaSeedPipeline:
         assert _synth_transform(42) == _synth_transform(42)
         assert _synth_transform(0) != _synth_transform(1)  # different inputs differ
 
-    def test_phonetic_vibration(self):
-        """Phonetic vibration is deterministic and position-weighted."""
-        from mahaclaw.manas import _phonetic_vibration
-        v1 = _phonetic_vibration("abc")
-        v2 = _phonetic_vibration("abc")
+    def test_shabda_vibration(self):
+        """Shabda vibration (phonetic) is deterministic."""
+        from mahaclaw.manas import _text_to_vibration_sum
+        v1 = _text_to_vibration_sum("abc")
+        v2 = _text_to_vibration_sum("abc")
         assert v1 == v2
-        # "ab" and "ba" should differ (position-weighted)
-        assert _phonetic_vibration("ab") != _phonetic_vibration("ba")
+        # Different texts produce different vibration sums
+        assert _text_to_vibration_sum("hello") != _text_to_vibration_sum("world")
 
     def test_no_keywords_in_manas(self):
         """Verify _KEYWORD_ACTIONS does not exist in manas module."""
