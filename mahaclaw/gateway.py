@@ -25,6 +25,7 @@ import sys
 import time
 from pathlib import Path
 
+from .buddhi import VerdictAction, check_intent
 from .intercept import parse_intent
 from .tattva import classify
 from .rama import encode_rama
@@ -168,6 +169,9 @@ async def _process_message(text: str) -> dict:
 
     raw = json.dumps(data)
     intent = parse_intent(raw)
+    verdict = check_intent(intent)
+    if verdict.action == VerdictAction.ABORT:
+        return {"ok": False, "error": f"Buddhi ABORT: {verdict.reason}"}
     tattva = classify(intent)
     rama = encode_rama(intent, tattva)
     route = resolve_route(intent, rama)

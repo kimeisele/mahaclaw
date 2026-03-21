@@ -14,6 +14,7 @@ import signal
 import sys
 from pathlib import Path
 
+from .buddhi import VerdictAction, check_intent
 from .intercept import parse_intent
 from .tattva import classify
 from .rama import encode_rama
@@ -41,6 +42,11 @@ async def handle_client(
 
         # Gate 1: PARSE
         intent = parse_intent(text)
+
+        # Gate 1.5: BUDDHI (safety gate — deterministic, zero LLM)
+        verdict = check_intent(intent)
+        if verdict.action == VerdictAction.ABORT:
+            raise ValueError(f"Buddhi ABORT: {verdict.reason}")
 
         # Gate 2: VALIDATE (Tattva classification)
         tattva_result = classify(intent)

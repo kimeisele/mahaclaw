@@ -1284,3 +1284,216 @@ class TestStewardOnlyBridge:
         assert _detect_intent("investigate this bug") == "inquiry"
         assert _detect_intent("what agents are in the network?") == "discover_peers"
         assert _detect_intent("refactor the code") == "code_analysis"
+
+
+# ---------------------------------------------------------------------------
+# Buddhi (Safety Gate)
+# ---------------------------------------------------------------------------
+
+from mahaclaw.buddhi import (
+    VerdictAction, BuddhiVerdict, Impression, Chitta,
+    check_intent, detect_patterns,
+)
+
+
+class TestBuddhiGate:
+    def test_safe_intent_continues(self):
+        intent = {"intent": "inquiry", "target": "agent-research", "priority": "rajas", "ttl_ms": 24000}
+        v = check_intent(intent)
+        assert v.action == VerdictAction.CONTINUE
+
+    def test_blocked_intent_aborts(self):
+        intent = {"intent": "delete_all", "target": "x", "priority": "rajas", "ttl_ms": 24000}
+        v = check_intent(intent)
+        assert v.action == VerdictAction.ABORT
+
+    def test_dangerous_substring_aborts(self):
+        intent = {"intent": "rm -rf everything", "target": "x", "priority": "rajas", "ttl_ms": 24000}
+        v = check_intent(intent)
+        assert v.action == VerdictAction.ABORT
+
+    def test_invalid_priority_redirects(self):
+        intent = {"intent": "inquiry", "target": "x", "priority": "mega", "ttl_ms": 24000}
+        v = check_intent(intent)
+        assert v.action == VerdictAction.REDIRECT
+
+    def test_negative_ttl_redirects(self):
+        intent = {"intent": "inquiry", "target": "x", "priority": "rajas", "ttl_ms": -1}
+        v = check_intent(intent)
+        assert v.action == VerdictAction.REDIRECT
+
+    def test_restricted_target_high_priority_reflects(self):
+        intent = {"intent": "inquiry", "target": "steward", "priority": "suddha", "ttl_ms": 24000}
+        v = check_intent(intent)
+        assert v.action == VerdictAction.REFLECT
+
+    def test_narasimha_bypass_blocked(self):
+        intent = {"intent": "bypass_viveka", "target": "x", "priority": "rajas", "ttl_ms": 24000}
+        v = check_intent(intent)
+        assert v.action == VerdictAction.ABORT
+
+
+class TestGandhaDetection:
+    def test_no_patterns_on_empty(self):
+        assert detect_patterns([]) is None
+
+    def test_consecutive_errors_aborts(self):
+        imps = [Impression(name="bash", success=False, error="fail") for _ in range(5)]
+        v = detect_patterns(imps)
+        assert v is not None
+        assert v.action == VerdictAction.ABORT
+
+    def test_identical_calls_reflects(self):
+        imps = [Impression(name="bash", params_hash=42, success=False) for _ in range(3)]
+        v = detect_patterns(imps)
+        assert v is not None
+        assert v.action in (VerdictAction.REFLECT, VerdictAction.ABORT)
+
+    def test_blind_write_redirects(self):
+        imps = [Impression(name="edit_file", path="/foo.py", success=True)]
+        v = detect_patterns(imps, prior_reads=frozenset())
+        assert v is not None
+        assert v.action == VerdictAction.REDIRECT
+
+    def test_write_after_read_ok(self):
+        imps = [Impression(name="edit_file", path="/foo.py", success=True)]
+        v = detect_patterns(imps, prior_reads=frozenset({"/foo.py"}))
+        assert v is None
+
+    def test_high_error_ratio_reflects(self):
+        imps = [Impression(name=f"t{i}", success=(i == 0)) for i in range(5)]
+        v = detect_patterns(imps)
+        assert v is not None
+        assert v.action == VerdictAction.REFLECT
+
+
+class TestChitta:
+    def test_record_and_evaluate(self):
+        c = Chitta()
+        c.record(Impression(name="read_file", path="/x.py", success=True))
+        assert "/x.py" in c.prior_reads
+        v = c.evaluate()
+        assert v.action == VerdictAction.CONTINUE
+
+    def test_clear_preserves_prior_reads(self):
+        c = Chitta()
+        c.record(Impression(name="read_file", path="/x.py", success=True))
+        c.clear()
+        assert "/x.py" in c.prior_reads
+        assert len(c.impressions) == 0
+
+
+# ---------------------------------------------------------------------------
+# Ahamkara (Identity / Signing)
+# ---------------------------------------------------------------------------
+
+from mahaclaw.ahamkara import (
+    hmac_sign, hmac_verify, hmac_fingerprint,
+    sign_envelope, verify_envelope, stamp_envelope,
+    get_identity, _canonical_content, KEYS_DIR,
+)
+import shutil
+
+
+class TestAhamkara:
+    @pytest.fixture(autouse=True)
+    def _clean_keys(self, tmp_path, monkeypatch):
+        """Use temp directory for keys so tests don't pollute real keys."""
+        keys_dir = tmp_path / ".mahaclaw" / "keys"
+        monkeypatch.setattr("mahaclaw.ahamkara.KEYS_DIR", keys_dir)
+        monkeypatch.setattr("mahaclaw.ahamkara.HMAC_KEY_FILE", keys_dir / "hmac.key")
+        monkeypatch.setattr("mahaclaw.ahamkara.ECDSA_PRIVATE_FILE", keys_dir / "private.pem")
+        monkeypatch.setattr("mahaclaw.ahamkara.ECDSA_PUBLIC_FILE", keys_dir / "public.pem")
+
+    def test_hmac_sign_and_verify(self):
+        sig = hmac_sign("hello")
+        assert hmac_verify("hello", sig)
+        assert not hmac_verify("tampered", sig)
+
+    def test_hmac_fingerprint_stable(self):
+        fp1 = hmac_fingerprint()
+        fp2 = hmac_fingerprint()
+        assert fp1 == fp2
+        assert len(fp1) == 16
+
+    def test_stamp_envelope_adds_fields(self):
+        env = {
+            "source": "mahaclaw", "target": "steward",
+            "operation": "inquiry", "nadi_type": "vyana",
+            "priority": 5, "ttl_ms": 24000,
+            "envelope_id": "env_abc", "correlation_id": "corr_123",
+        }
+        stamped = stamp_envelope(env)
+        assert "_signature" in stamped
+        assert "_signer_fingerprint" in stamped
+        assert "_signing_method" in stamped
+        assert len(stamped["_signer_fingerprint"]) == 16
+
+    def test_verify_stamped_envelope(self):
+        env = {
+            "source": "mahaclaw", "target": "steward",
+            "operation": "inquiry", "nadi_type": "vyana",
+            "priority": 5, "ttl_ms": 24000,
+            "envelope_id": "env_abc", "correlation_id": "corr_123",
+        }
+        stamped = stamp_envelope(env)
+        assert verify_envelope(stamped)
+
+    def test_tampered_envelope_fails(self):
+        env = {
+            "source": "mahaclaw", "target": "steward",
+            "operation": "inquiry", "nadi_type": "vyana",
+            "priority": 5, "ttl_ms": 24000,
+            "envelope_id": "env_abc", "correlation_id": "corr_123",
+        }
+        stamped = stamp_envelope(env)
+        stamped["target"] = "evil-agent"
+        assert not verify_envelope(stamped)
+
+    def test_identity_method(self):
+        ident = get_identity()
+        assert ident.signing_method in ("ecdsa", "hmac-sha256")
+        assert len(ident.fingerprint) == 16
+
+    def test_canonical_content_deterministic(self):
+        env = {"source": "a", "target": "b", "operation": "c",
+               "nadi_type": "d", "priority": 1, "ttl_ms": 2,
+               "envelope_id": "e", "correlation_id": "f", "extra": "ignored"}
+        c1 = _canonical_content(env)
+        c2 = _canonical_content(env)
+        assert c1 == c2
+        assert "extra" not in c1
+
+
+class TestAhamkaraInPipeline:
+    """Test that Ahamkara is wired into the envelope pipeline."""
+
+    @pytest.fixture(autouse=True)
+    def _clean(self, tmp_path, monkeypatch):
+        keys_dir = tmp_path / ".mahaclaw" / "keys"
+        monkeypatch.setattr("mahaclaw.ahamkara.KEYS_DIR", keys_dir)
+        monkeypatch.setattr("mahaclaw.ahamkara.HMAC_KEY_FILE", keys_dir / "hmac.key")
+        monkeypatch.setattr("mahaclaw.ahamkara.ECDSA_PRIVATE_FILE", keys_dir / "private.pem")
+        monkeypatch.setattr("mahaclaw.ahamkara.ECDSA_PUBLIC_FILE", keys_dir / "public.pem")
+        outbox = tmp_path / "nadi_outbox.json"
+        monkeypatch.setattr("mahaclaw.envelope.OUTBOX_PATH", outbox)
+
+    def test_build_and_enqueue_stamps(self):
+        from mahaclaw.intercept import parse_intent
+        from mahaclaw.tattva import classify
+        from mahaclaw.rama import encode_rama
+        from mahaclaw.lotus import resolve_route
+        from mahaclaw.envelope import build_and_enqueue, OUTBOX_PATH
+
+        raw = json.dumps({"intent": "inquiry", "target": "agent-research", "payload": {"q": "test"}})
+        intent = parse_intent(raw)
+        tattva = classify(intent)
+        rama = encode_rama(intent, tattva)
+        route = resolve_route(intent, rama)
+        eid, cid = build_and_enqueue(intent, rama, route)
+
+        outbox = json.loads(OUTBOX_PATH.read_text())
+        assert len(outbox) >= 1
+        last = outbox[-1]
+        assert "_signature" in last
+        assert "_signer_fingerprint" in last

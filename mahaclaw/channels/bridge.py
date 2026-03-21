@@ -18,6 +18,7 @@ import time
 from dataclasses import dataclass, field
 
 from . import IncomingMessage
+from ..buddhi import VerdictAction, check_intent
 from ..intercept import parse_intent
 from ..tattva import classify
 from ..rama import encode_rama
@@ -144,6 +145,10 @@ class ChannelBridge:
 
         try:
             intent = parse_intent(raw)
+            verdict = check_intent(intent)
+            if verdict.action == VerdictAction.ABORT:
+                self._reply(msg, f"Blocked: {verdict.reason}")
+                return
             tattva = classify(intent)
             rama = encode_rama(intent, tattva)
             route = resolve_route(intent, rama)
