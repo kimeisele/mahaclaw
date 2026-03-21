@@ -59,6 +59,15 @@ envelope payload under `_openclaw` for the reverse path.
 - Parampara vector = `(position + 1) * 37`
 - Unknown intents default to position 9 (Prahlada/EXEC_SERVICE), vayu (general)
 - OpenClaw session/skill metadata preserved in `payload._openclaw`
+- **Anauralia**: Antahkarana components communicate via seeds, enums, hashes, counts,
+  ratios, and booleans. Never via natural language. This is a security constraint
+  (prompt injection resistance at routing layer) and a philosophical constraint
+  (BG 3.42: Buddhi operates above language). Enforced by `tests/test_anauralia.py`.
+  - Allowed between components: `int`, `float`, `bool`, `Enum`, `frozenset`
+  - Allowed str fields: identifiers only (tool_name, path, matched, target)
+  - Forbidden str fields: reason, suggestion, description, message, explanation
+  - Language enters at Shrotra (boundary). Language exits at Vak (boundary).
+  - Inside the Antahkarana: only numbers, enums, hashes, and weights.
 
 ## Upstream wire format
 
@@ -148,6 +157,11 @@ mahaclaw/
   rama.py               Gate 3 EXECUTE
   lotus.py              Gate 4 RESULT
   envelope.py           Gate 5 SYNC
+  manas.py              Antahkarana: mind (deterministic seed routing)
+  buddhi.py             Antahkarana: intellect (coordinator, Hebbian, tier, phase)
+  chitta.py             Antahkarana: memory (impressions, phase, Gandha detection)
+  narasimha.py          Guardian: kill-switch (blocklist, runs before Buddhi)
+  pani.py               Karmendriya: hands (tool dispatch, namespaces, gates)
   inbox.py              Return loop — poll nadi_inbox.json for responses
   daemon.py             asyncio Unix socket server
   gateway.py            WebSocket gateway (port 18789, stdlib RFC 6455)
@@ -175,7 +189,11 @@ openclaw_skill/
     federation-relay.sh command:new hook for automatic forwarding
 
 tests/
-  test_mahaclaw.py      84 tests (gates + inbox + CLI + chat + session + skills + sandbox + gateway + llm + channels + bridge)
+  test_mahaclaw.py      130 tests (gates + inbox + CLI + chat + session + skills + sandbox + gateway + llm + channels + bridge)
+  test_pani_chitta.py   53 tests (Pani dispatch + Chitta impressions + Gandha detection)
+  test_buddhi_antahkarana.py  49 tests (Buddhi coordinator + Narasimha + Hebbian + tiers)
+  test_vertical.py      4 tests (full 15-element flows + Antahkarana integration)
+  test_anauralia.py     13 tests (lint: no natural language between components)
   integration/
     mock_openclaw.js    Node.js mock gateway (44 integration tests)
 

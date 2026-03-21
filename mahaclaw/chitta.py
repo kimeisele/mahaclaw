@@ -284,13 +284,29 @@ class VerdictAction(str, enum.Enum):
     INFO = "info"
 
 
+class GandhaCause(str, enum.Enum):
+    """What Gandha detected. Structured — no natural language."""
+    CONSECUTIVE_ERRORS = "consecutive_errors"
+    IDENTICAL_CALLS = "identical_calls"
+    TOOL_STREAK = "tool_streak"
+    ERROR_RATIO = "error_ratio"
+    WRITE_WITHOUT_READ = "write_without_read"
+
+
 @dataclass(frozen=True)
 class Detection:
-    """A detected pattern from Gandha analysis."""
+    """A detected pattern from Gandha analysis.
+
+    ANAURALIA: No natural language fields. Components communicate via
+    enums, counts, ratios, and identifiers (tool names, file paths).
+    """
     severity: VerdictAction
-    pattern: str
-    reason: str = ""
-    suggestion: str = ""
+    cause: GandhaCause
+    count: int = 0            # how many (errors, repeats, streaks)
+    threshold: int = 0        # what triggered it
+    tool_name: str = ""       # identifier, not language
+    ratio: float = 0.0        # for error_ratio
+    path: str = ""            # file path identifier, not language
 
 
 def detect_patterns(
@@ -325,8 +341,9 @@ def _check_consecutive_errors(impressions: list[Impression]) -> Detection | None
     if all(not r.success for r in recent):
         return Detection(
             severity=VerdictAction.ABORT,
-            pattern="consecutive_errors",
-            reason=f"{MAX_CONSECUTIVE_ERRORS} consecutive errors",
+            cause=GandhaCause.CONSECUTIVE_ERRORS,
+            count=MAX_CONSECUTIVE_ERRORS,
+            threshold=MAX_CONSECUTIVE_ERRORS,
         )
     return None
 
@@ -342,8 +359,10 @@ def _check_identical_calls(impressions: list[Impression]) -> Detection | None:
         return None
     return Detection(
         severity=VerdictAction.REFLECT,
-        pattern="identical_calls",
-        reason=f"Identical call repeated {MAX_IDENTICAL_CALLS}x: {recent[0].name}",
+        cause=GandhaCause.IDENTICAL_CALLS,
+        count=MAX_IDENTICAL_CALLS,
+        threshold=MAX_IDENTICAL_CALLS,
+        tool_name=recent[0].name,
     )
 
 
@@ -356,8 +375,10 @@ def _check_tool_streak(impressions: list[Impression]) -> Detection | None:
             return None  # read_file streaks are legitimate
         return Detection(
             severity=VerdictAction.REFLECT,
-            pattern="tool_streak",
-            reason=f"Same tool '{recent[0].name}' used {MAX_SAME_TOOL_STREAK}x consecutively",
+            cause=GandhaCause.TOOL_STREAK,
+            count=MAX_SAME_TOOL_STREAK,
+            threshold=MAX_SAME_TOOL_STREAK,
+            tool_name=recent[0].name,
         )
     return None
 
@@ -371,8 +392,10 @@ def _check_error_ratio(impressions: list[Impression]) -> Detection | None:
     if ratio >= ERROR_RATIO_THRESHOLD:
         return Detection(
             severity=VerdictAction.REFLECT,
-            pattern="error_ratio",
-            reason=f"Error ratio {ratio:.0%} exceeds threshold ({ERROR_RATIO_THRESHOLD:.0%})",
+            cause=GandhaCause.ERROR_RATIO,
+            count=errors,
+            threshold=total,
+            ratio=ratio,
         )
     return None
 
@@ -394,6 +417,7 @@ def _check_write_without_read(
             return None
     return Detection(
         severity=VerdictAction.REDIRECT,
-        pattern="write_without_read",
-        reason=f"Blind write to '{last.path}' — file was never read first",
+        cause=GandhaCause.WRITE_WITHOUT_READ,
+        tool_name=last.name,
+        path=last.path,
     )
