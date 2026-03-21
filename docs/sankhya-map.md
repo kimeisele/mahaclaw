@@ -57,17 +57,15 @@ Two implementations in steward-protocol:
 - **steward-protocol**: `MANAS.md` — full architecture doc, 8 senses, intent lifecycle, handler routing
 - **steward**: `steward/antahkarana/manas.py` → `Manas` — `MahaCompression.decode_samskara_intent()` for guna, `MahaBuddhi.think()` for function → `ManasPerception(action, guna, function, approach)`. Zero LLM.
 - **agent-city**: `city/attention.py` → `CityAttention` (O(1) intent→handler via `MahaAttention`), `city/router.py` → `CityRouter` (cap/dom/tier routing), `city/signal_router.py` → 5D coordinate routing
-- **Maha Claw**: `tattva.py` → static `_AFFINITY_RULES` substring match. Primitive. No OODA, no Manas integration.
-- **Wire**: Replace `_AFFINITY_RULES` with `MahaManas.perceive()` + `MahaManas.decide()` logic. Or at minimum import the `ManasPerception` output format.
-- **Status**: ✅ Rich in steward + steward-protocol. ⚠️ Maha Claw has stub only.
+- **Maha Claw**: `manas.py` → `perceive()` — exact port of steward's pipeline: SHA-256 + Shabda phonetic vibration + MahaModularSynth 16-step → seed → two-position system (guna from seed, function/approach from attractor) → affinity chain → ActionType. Zero keywords, zero LLM. Verified against steward-protocol with 10-string ground truth (64 parametrized tests).
+- **Status**: ✅ **WIRED**. Verified compatible with steward-protocol.
 
 ## 6. Chitta (चित्त) — Memory / Impression Store
 
 - **steward**: `steward/antahkarana/chitta.py` → `Chitta` — stores tool-execution impressions (Samskaras), derives execution phase, cross-turn awareness via `prior_reads`
 - **steward-protocol**: Part of Prakriti's PRANA layer
-- **Maha Claw**: `session.py` ledger entries (message_in/out, pipeline, error, response) = proto-Chitta
-- **Wire**: Align ledger entry format with Chitta's impression model
-- **Status**: ✅ steward. ⚠️ Maha Claw partial (ledger exists but no impression derivation).
+- **Maha Claw**: `chitta.py` → `Chitta` — exact port of steward's impression model: `Impression{name, params_hash, success, error, path}`, `ExecutionPhase` derivation (ORIENT→EXECUTE→VERIFY→COMPLETE), cross-turn `prior_reads`, `end_turn()`, `to_summary()`/`load_summary()`. Also includes Gandha pattern detection. Session ledger (`session.py`) provides persistence layer underneath.
+- **Status**: ✅ **WIRED**. Verified with 31 tests.
 
 ---
 
@@ -106,9 +104,8 @@ Two implementations in steward-protocol:
 
 - **steward**: `steward/antahkarana/gandha.py` → `detect_patterns()` — detects stuck loops, error cascades, blind writes, duplicate reads, tool streaks, error ratio → `VerdictAction` (CONTINUE/REFLECT/REDIRECT/ABORT/INFO)
 - **steward-protocol**: `veda.py` Phase 4 → `class Karma` — execute + record
-- **Maha Claw**: ❌ No anomaly detection
-- **Wire**: Import gandha pattern detection for pipeline health
-- **Status**: ✅ steward. ❌ Missing in Maha Claw.
+- **Maha Claw**: `chitta.py` → `detect_patterns()` — port of steward's Gandha: consecutive_errors (ABORT), identical_calls (REFLECT), tool_streak (REFLECT), error_ratio (REFLECT), write_without_read (REDIRECT). Same thresholds (3/5/8/70%). Same `VerdictAction` enum, same `Detection` dataclass.
+- **Status**: ✅ **WIRED**. Verified with 10 tests.
 
 ---
 
@@ -169,9 +166,8 @@ Two implementations in steward-protocol:
 
 - **steward-protocol**: `vibe_core/tools/tool_registry.py` → `ToolRegistry.execute`
 - **steward-protocol**: `cortex/silpa.py` → `SilpaArchitect` — AST transforms, safe refactoring
-- **Maha Claw**: `tools/sandbox.py` → `ToolSandbox` — allowlist shell, scoped filesystem
-- **Wire**: Sandbox exists but is NOT connected to the runtime pipeline. Bridge needs to invoke sandbox on tool-type intents.
-- **Status**: ✅ steward. ⚠️ Maha Claw has sandbox, not wired.
+- **Maha Claw**: `pani.py` → `dispatch()` pipeline: Manas perceive → ActionType → ToolNamespace → allowed tools → gate check → sandbox execute → ToolResult. Ports steward's `ToolResult{success, output, error, metadata}`, `ToolUse{id, name, parameters}`, `ToolNamespace` (OBSERVE/MODIFY/EXECUTE/DELEGATE), `_ACTION_NAMESPACES` mapping, `check_tool_gates()` (route + safety + Iron Dome), `resolve_namespaces()`, `register_tool()`/`unregister_tool()`. Sandbox (`tools/sandbox.py`) provides the execution backend.
+- **Status**: ✅ **WIRED**. Verified with 22 tests.
 
 ### 19. Pada (पाद) — Feet / Navigation & Routing
 
@@ -283,13 +279,13 @@ Two implementations in steward-protocol:
 |---------|-------------------|----------|--------|
 | **Buddhi** | ❌ Missing | **P0** | Add safety gate to pipeline |
 | **Ahamkara** | ❌ Missing | **P0** | Add ECDSA envelope signing |
-| **Manas** | ⚠️ Stub | **P1** | Replace _AFFINITY_RULES with MahaManas logic |
-| **Gandha** | ❌ Missing | **P1** | Add anomaly detection to pipeline |
-| **Pani** | ⚠️ Not wired | **P1** | Connect sandbox to runtime |
+| **Manas** | ✅ Wired | ~~P1~~ | Seed-based routing, verified compat |
+| **Gandha** | ✅ Wired | ~~P1~~ | Pattern detection in chitta.py |
+| **Pani** | ✅ Wired | ~~P1~~ | Tool dispatch pipeline |
 | **Payu** | ❌ Missing | **P2** | Add outbox rotation + session expiry |
 | **Rasa** | ❌ Missing | **P2** | Add trust/auth validation |
 | **Narasimha** | ⚠️ Proto | **P2** | Formalize threat levels |
-| **Chitta** | ⚠️ Partial | **P2** | Align session with impression model |
+| **Chitta** | ✅ Wired | ~~P2~~ | Impression model + phase derivation |
 | **Vedana** | ❌ Missing | **P3** | Add health pulse |
 | **KsetraJna** | ⚠️ Proto | **P3** | Expand buddy_bubble |
 | **Cetana** | External | **P3** | Add in-process heartbeat |
