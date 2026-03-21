@@ -2,17 +2,43 @@
 
 PrakritiElement #1 — classifies intent WITHOUT an LLM.
 
-Mirrors steward/antahkarana/manas.py but pure stdlib.
+Mirrors steward/antahkarana/manas.py — the gold standard.
 Steward uses MahaCompression + MahaBuddhi substrate primitives.
-We replicate the same deterministic logic via seed hashing.
+We replicate the same deterministic logic via pure stdlib:
+  SHA-256 → phonetic vibration → MahaModularSynth → position → perception.
 
-Output: ManasPerception(action, guna, function, approach)
+ZERO keywords. Everything derives from the seed.
+
+Output: ManasPerception(action, guna, function, approach, position)
 """
 from __future__ import annotations
 
 import enum
 import hashlib
 from dataclasses import dataclass
+
+
+# ---------------------------------------------------------------------------
+# Mahamantra constants (from steward-protocol seed axioms)
+# ---------------------------------------------------------------------------
+
+WORDS = 16              # 16 Mahamantra positions
+QUARTERS = 4            # 4 quarters of 4 positions each
+MAHA_QUANTUM = 137      # Sacred prime (steward-protocol _secondary.py)
+PARAMPARA = 37           # Succession constant (steward-protocol _secondary.py)
+HEAD_POSITIONS = (0, 4, 8, 12)  # Quarter heads (steward-protocol _primary.py)
+QUARTER_NAMES = ("genesis", "dharma", "karma", "moksha")
+
+# Hare/Krishna/Rama position sets (steward-protocol _extended.py)
+HARE_POSITIONS = frozenset({0, 2, 6, 7, 8, 10, 14, 15})
+KRISHNA_POSITIONS = frozenset({1, 3, 4, 5})
+RAMA_POSITIONS = frozenset({9, 11, 12, 13})
+
+# Guna opcode sets (steward-protocol guna.py)
+# Each position 0-15 maps to a MantraOpCode, each opcode to a guna.
+SATTVA_POSITIONS = frozenset({6, 7, 14, 15})
+RAJAS_POSITIONS = frozenset({0, 1, 2, 4, 5, 8, 9, 10, 11})
+TAMAS_POSITIONS = frozenset({3, 12, 13})
 
 
 # ---------------------------------------------------------------------------
@@ -44,14 +70,14 @@ class IntentGuna(str, enum.Enum):
 
 
 class Function(str, enum.Enum):
-    """Trinity function. BRAHMA=create, VISHNU=maintain, SHIVA=transform."""
-    BRAHMA = "creator"
-    VISHNU = "maintainer"
-    SHIVA = "destroyer"
+    """Trinity function from position. Hare=carrier, Krishna=source, Rama=deliverer."""
+    CARRIER = "carrier"       # Hare positions — transport/build
+    SOURCE = "source"         # Krishna positions — originate/maintain
+    DELIVERER = "deliverer"   # Rama positions — deliver/respond
 
 
 class Approach(str, enum.Enum):
-    """MURALI cycle phase."""
+    """MURALI cycle phase. Derived from quarter (position // 4)."""
     GENESIS = "genesis"
     DHARMA = "dharma"
     KARMA = "karma"
@@ -65,97 +91,125 @@ class ManasPerception:
     guna: IntentGuna
     function: Function
     approach: Approach
+    position: int  # 0-15 Mahamantra position
 
 
 # ---------------------------------------------------------------------------
-# Seed computation — mirrors MahaCompression.compress() logic
+# Seed computation — mirrors MahaCompression.compress() pipeline
 # ---------------------------------------------------------------------------
+
+def _phonetic_vibration(text: str) -> int:
+    """Phonetic vibration sum. Mirrors MahaCompression phonetic component.
+
+    Sanskrit-inspired: each character's ordinal weighted by position,
+    producing a deterministic vibration signature of the text.
+    """
+    return sum(ord(c) * (i + 1) for i, c in enumerate(text)) & 0xFFFFFFFF
+
+
+def _synth_transform(seed: int) -> int:
+    """MahaModularSynth deterministic transform.
+
+    Uses Mahamantra constants (MAHA_QUANTUM=137, PARAMPARA=37) for
+    modular arithmetic mixing. Mirrors MahaModularSynth("quantum").transform().
+    """
+    x = seed & 0xFFFFFFFF
+    x = (x * MAHA_QUANTUM + PARAMPARA) & 0xFFFFFFFF
+    x = x ^ (x >> 13)
+    x = (x * MAHA_QUANTUM) & 0xFFFFFFFF
+    x = x ^ (x >> 17)
+    return x
+
 
 def _compute_seed(text: str) -> int:
-    """Deterministic seed from text. Mirrors Mahamantra VM seed generation."""
-    return int(hashlib.sha256(text.encode()).hexdigest()[:8], 16)
+    """Full seed pipeline. Mirrors MahaCompression.compress().
 
-
-def _seed_to_guna(seed: int) -> IntentGuna:
-    """Map seed to guna. Mirrors MahaCompression.decode_samskara_intent().
-
-    The distribution follows the Vedic proportion:
-    - suddha: rare (12.5%)
-    - sattva: uncommon (25%)
-    - rajas: common (37.5%)
-    - tamas: common (25%)
+    Steps (from steward-protocol compression.py):
+    1. SHA-256(text.lower()) → raw hash integer
+    2. XOR with phonetic vibration sum → merged
+    3. merged % WORDS → category (which of 16 positions)
+    4. (category * MAHA_QUANTUM) + (merged % MAHA_QUANTUM) → base_seed
+    5. MahaModularSynth.transform(base_seed) → transformed
+    6. transformed % MAHA_QUANTUM → attractor_component
+    7. Bit-pack: (category << 24) | (transformed << 12) | attractor_component → final_seed
     """
-    bucket = seed % 8
-    if bucket < 2:
-        return IntentGuna.TAMAS
-    if bucket < 5:
-        return IntentGuna.RAJAS
-    if bucket < 7:
+    lower = text.lower()
+    raw = int(hashlib.sha256(lower.encode()).hexdigest()[:8], 16)
+    vibration = _phonetic_vibration(lower)
+    merged = raw ^ vibration
+
+    category = merged % WORDS
+    base_seed = (category * MAHA_QUANTUM) + (merged % MAHA_QUANTUM)
+
+    transformed = _synth_transform(base_seed)
+    attractor_component = transformed % MAHA_QUANTUM
+
+    final_seed = ((category << 24) | (transformed << 12) | attractor_component) & 0xFFFFFFFF
+    return final_seed
+
+
+def _seed_to_position(seed: int) -> int:
+    """Position from seed. Mirrors Lotus pada_sevanam() + dasyam().
+
+    attractor = synth_transform(seed)
+    position = attractor % WORDS
+    """
+    attractor = _synth_transform(seed)
+    return attractor % WORDS
+
+
+# ---------------------------------------------------------------------------
+# Position → perception components (all deterministic from position)
+# ---------------------------------------------------------------------------
+
+def _position_to_guna(position: int) -> IntentGuna:
+    """Map position to guna via MantraOpCode sets.
+
+    From steward-protocol guna.py:
+    - SATTVA_OPCODES = {6, 7, 14, 15}
+    - RAJAS_OPCODES = {0, 1, 2, 4, 5, 8, 9, 10, 11}
+    - TAMAS_OPCODES = {3, 12, 13}
+    """
+    if position in SATTVA_POSITIONS:
         return IntentGuna.SATTVA
-    return IntentGuna.SUDDHA
+    if position in TAMAS_POSITIONS:
+        return IntentGuna.TAMAS
+    return IntentGuna.RAJAS
 
 
-def _seed_to_function(seed: int) -> Function:
-    """Map seed to trinity function. Mirrors MahaBuddhi.think() function field."""
-    bucket = (seed >> 8) % 3
-    return [Function.BRAHMA, Function.VISHNU, Function.SHIVA][bucket]
+def _position_to_function(position: int) -> Function:
+    """Map position to trinity function via Hare/Krishna/Rama sets.
+
+    From steward-protocol _extended.py:
+    - HARE positions → carrier (transport/build)
+    - KRISHNA positions → source (originate/maintain)
+    - RAMA positions → deliverer (deliver/respond)
+    """
+    if position in HARE_POSITIONS:
+        return Function.CARRIER
+    if position in KRISHNA_POSITIONS:
+        return Function.SOURCE
+    if position in RAMA_POSITIONS:
+        return Function.DELIVERER
+    return Function.CARRIER  # unreachable but safe
 
 
-def _seed_to_approach(seed: int) -> Approach:
-    """Map seed to MURALI approach. Mirrors MahaBuddhi.think() approach field."""
-    bucket = (seed >> 16) % 4
-    return [Approach.GENESIS, Approach.DHARMA, Approach.KARMA, Approach.MOKSHA][bucket]
+def _position_to_approach(position: int) -> Approach:
+    """Map position to approach via quarter.
+
+    From steward-protocol _primary.py:
+    quarter = position // QUARTERS
+    0-3: genesis, 4-7: dharma, 8-11: karma, 12-15: moksha
+    """
+    quarter_idx = position // QUARTERS
+    return [Approach.GENESIS, Approach.DHARMA, Approach.KARMA, Approach.MOKSHA][quarter_idx]
 
 
 # ---------------------------------------------------------------------------
-# Keyword-based overrides — supplements seed classification
+# Affinity chains — ActionType from perception (steward gold standard)
 # ---------------------------------------------------------------------------
 
-# Intent keywords → ActionType (checked first, overrides seed).
-# More specific patterns first — "code_analysis" should match "code" not "analysis".
-_KEYWORD_ACTIONS: list[tuple[str, ActionType]] = [
-    # Engineering / code (most specific first)
-    ("code", ActionType.IMPLEMENT),
-    ("build", ActionType.IMPLEMENT),
-    ("implement", ActionType.IMPLEMENT),
-    ("create", ActionType.IMPLEMENT),
-    ("fix", ActionType.DEBUG),
-    ("debug", ActionType.DEBUG),
-    ("test", ActionType.TEST),
-    ("refactor", ActionType.REFACTOR),
-    ("deploy", ActionType.DEPLOY),
-    ("review", ActionType.REVIEW),
-    # Research / knowledge
-    ("research", ActionType.RESEARCH),
-    ("inquiry", ActionType.RESEARCH),
-    ("question", ActionType.RESEARCH),
-    ("analysis", ActionType.RESEARCH),
-    ("investigate", ActionType.RESEARCH),
-    # Discovery
-    ("explore", ActionType.DISCOVER),
-    ("discover", ActionType.DISCOVER),
-    ("search", ActionType.DISCOVER),
-    # Governance
-    ("governance", ActionType.GOVERN),
-    ("policy", ActionType.GOVERN),
-    ("vote", ActionType.GOVERN),
-    ("trust", ActionType.GOVERN),
-    # Communication
-    ("heartbeat", ActionType.MONITOR),
-    ("ping", ActionType.MONITOR),
-    ("status", ActionType.MONITOR),
-    ("respond", ActionType.RESPOND),
-    ("reply", ActionType.RESPOND),
-]
-
-# Function affinity (from steward's _FUNCTION_AFFINITY)
-_FUNCTION_TO_ACTION: dict[Function, ActionType] = {
-    Function.BRAHMA: ActionType.IMPLEMENT,
-    Function.VISHNU: ActionType.MONITOR,
-    Function.SHIVA: ActionType.REFACTOR,
-}
-
-# Approach affinity (from steward's _APPROACH_AFFINITY)
+# Approach affinity (from steward/antahkarana/manas.py _APPROACH_AFFINITY)
 _APPROACH_TO_ACTION: dict[Approach, ActionType] = {
     Approach.GENESIS: ActionType.IMPLEMENT,
     Approach.DHARMA: ActionType.REVIEW,
@@ -163,7 +217,14 @@ _APPROACH_TO_ACTION: dict[Approach, ActionType] = {
     Approach.MOKSHA: ActionType.RESEARCH,
 }
 
-# Guna defaults (from steward's guna_defaults)
+# Function affinity (from steward/antahkarana/manas.py _FUNCTION_AFFINITY)
+_FUNCTION_TO_ACTION: dict[Function, ActionType] = {
+    Function.CARRIER: ActionType.IMPLEMENT,
+    Function.SOURCE: ActionType.MONITOR,
+    Function.DELIVERER: ActionType.RESPOND,
+}
+
+# Guna defaults (from steward/antahkarana/manas.py guna_defaults)
 _GUNA_TO_ACTION: dict[IntentGuna, ActionType] = {
     IntentGuna.SATTVA: ActionType.RESEARCH,
     IntentGuna.RAJAS: ActionType.IMPLEMENT,
@@ -211,36 +272,38 @@ ACTION_NADI: dict[ActionType, str] = {
 def perceive(intent_str: str) -> ManasPerception:
     """Classify an intent string into a structured perception.
 
-    Deterministic. Zero LLM. Mirrors steward's Manas.perceive().
+    Deterministic. Zero LLM. Zero keywords. Pure seed.
+    Mirrors steward/antahkarana/manas.py gold standard.
 
-    Priority chain:
-    1. Keyword match → ActionType (most specific)
-    2. Approach affinity → ActionType
-    3. Function affinity → ActionType
-    4. Guna default → ActionType (least specific)
+    Pipeline:
+    1. text → seed (SHA-256 + phonetic vibration + MahaModularSynth)
+    2. seed → position (synth_transform + mod 16)
+    3. position → guna, function, approach (lookup tables)
+    4. approach → ActionType (primary affinity)
+       function → ActionType (secondary affinity)
+       guna → ActionType (tertiary default)
     """
     seed = _compute_seed(intent_str)
-    guna = _seed_to_guna(seed)
-    function = _seed_to_function(seed)
-    approach = _seed_to_approach(seed)
+    position = _seed_to_position(seed)
 
-    # Try keyword match first
-    action = None
-    lower = intent_str.lower()
-    for keyword, act in _KEYWORD_ACTIONS:
-        if keyword in lower:
-            action = act
-            break
+    guna = _position_to_guna(position)
+    function = _position_to_function(position)
+    approach = _position_to_approach(position)
 
-    # Fall back through the affinity chain (same as steward)
-    if action is None:
-        action = _APPROACH_TO_ACTION.get(approach)
+    # Affinity chain: approach > function > guna (same as steward)
+    action = _APPROACH_TO_ACTION.get(approach)
     if action is None:
         action = _FUNCTION_TO_ACTION.get(function)
     if action is None:
         action = _GUNA_TO_ACTION.get(guna, ActionType.IMPLEMENT)
 
-    return ManasPerception(action=action, guna=guna, function=function, approach=approach)
+    return ManasPerception(
+        action=action,
+        guna=guna,
+        function=function,
+        approach=approach,
+        position=position,
+    )
 
 
 def route_zone(perception: ManasPerception) -> str:

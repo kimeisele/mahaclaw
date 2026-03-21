@@ -97,20 +97,9 @@ def _parse_args() -> dict:
 
 def _send(text: str, target: str, wait_s: float) -> None:
     """Run the 5-gate pipeline and optionally wait for response."""
-    # Detect intent from text
-    intent_type = "inquiry"
-    lower = text.lower()
-    if any(kw in lower for kw in ("build", "code", "compile", "debug", "test")):
-        intent_type = "code_analysis"
-    elif any(kw in lower for kw in ("govern", "vote", "policy", "proposal")):
-        intent_type = "governance_proposal"
-    elif any(kw in lower for kw in ("find", "discover", "search", "who")):
-        intent_type = "discover_peers"
-    elif any(kw in lower for kw in ("status", "ping", "health", "alive")):
-        intent_type = "heartbeat"
-
+    # Pass raw text as intent — Manas routes by seed, not keywords
     raw = json.dumps({
-        "intent": intent_type,
+        "intent": text,
         "target": target,
         "payload": {"message": text},
         "priority": "rajas",

@@ -4,14 +4,14 @@ Maps OpenClaw intents to a 5-dimensional affinity vector across the
 Pancha Mahabhuta elements.  The dominant element determines the
 federation zone and NADI type for routing.
 
-Now powered by Manas (deterministic router) instead of static rules.
-Manas perceives the intent → ActionType → zone → element → affinity.
+Powered by Manas (deterministic seed router). Zero keywords. Zero LLM.
+Manas perceives the intent → position → ActionType → zone → element → affinity.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .manas import perceive, route_zone, route_nadi, ActionType, _KEYWORD_ACTIONS
+from .manas import perceive, route_zone, route_nadi, ActionType
 
 # Element → agent-city zone mapping
 ELEMENT_ZONES = {
@@ -40,7 +40,7 @@ _ZONE_TO_ELEMENT = {
     "engineering": "prithvi",
 }
 
-# ActionType → element affinity weights (replaces static _AFFINITY_RULES)
+# ActionType → element affinity weights
 _ACTION_AFFINITIES: dict[ActionType, dict[str, float]] = {
     ActionType.RESEARCH:  {"jala": 0.9, "akasha": 0.4},
     ActionType.IMPLEMENT: {"prithvi": 1.0},
@@ -79,33 +79,21 @@ class TattvaResult:
 def classify(intent: dict) -> TattvaResult:
     """Classify an OpenClaw intent into the Five Tattva dimensions.
 
-    Uses Manas (deterministic router) to perceive the intent, then maps
-    the perception to a 5D affinity vector. Zero LLM.
+    Uses Manas (deterministic seed router) to perceive the intent, then maps
+    the perception to a 5D affinity vector. Zero keywords. Zero LLM.
     """
     intent_str = intent["intent"]
 
-    # Manas perceives the intent
+    # Manas perceives the intent (pure seed pipeline)
     perception = perceive(intent_str)
-
-    # Check if any keyword actually matched (vs pure seed fallback)
-    _keyword_matched = any(kw in intent_str.lower() for kw, _ in _KEYWORD_ACTIONS)
-
-    if _keyword_matched:
-        zone = route_zone(perception)
-        nadi_type = route_nadi(perception)
-    else:
-        # No keyword match = unknown intent → vayu/general (safe default)
-        zone = "general"
-        nadi_type = "vyana"
+    zone = route_zone(perception)
+    nadi_type = route_nadi(perception)
 
     # Build affinity vector from ActionType
     weights = _ACTION_AFFINITIES.get(perception.action, {})
     scores = {e: 0.0 for e in ELEMENTS}
-    if _keyword_matched:
-        for element, weight in weights.items():
-            scores[element] = weight
-    else:
-        scores["vayu"] = 0.5
+    for element, weight in weights.items():
+        scores[element] = weight
 
     dominant = _ZONE_TO_ELEMENT.get(zone, "vayu")
     affinity = tuple(scores[e] for e in ELEMENTS)
