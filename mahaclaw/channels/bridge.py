@@ -148,8 +148,18 @@ class ChannelBridge:
             rama = encode_rama(intent, tattva)
             route = resolve_route(intent, rama)
             envelope_id, correlation_id = build_and_enqueue(intent, rama, route)
+        except ValueError as exc:
+            if "unroutable" in str(exc):
+                self._reply(msg,
+                    f"I don't know how to reach '{target}'. "
+                    f"Try /target steward or /target agent-research")
+            else:
+                self._reply(msg, f"Could not process your message: {exc}")
+            return
         except Exception as exc:
-            self._reply(msg, f"Pipeline error: {exc}")
+            self._reply(msg, f"Something went wrong processing your message. Try again or use /help")
+            import sys
+            print(f"  bridge: pipeline error — {exc}", file=sys.stderr)
             return
 
         self._sessions.log_message_out(
@@ -183,7 +193,10 @@ class ChannelBridge:
                             "Federation is not responding. Steward may be offline or relay is not running.\n"
                             "Check that the MURALI cycle and federation relay are active.")
             else:
-                self._reply(original_msg, "No response from federation (timeout)")
+                self._reply(original_msg,
+                    "No response from the federation yet. "
+                    "The relay may be slow or offline. "
+                    "Try /mode to switch to standalone LLM.")
             return
 
         extracted = extract_response_payload(response)
@@ -224,7 +237,14 @@ class ChannelBridge:
                 self._conversation_history[msg.session_id] = history[-20:]
             self._reply(msg, resp.content)
         else:
-            self._reply(msg, f"LLM error: {resp.error}")
+            error = resp.error or "unknown error"
+            if "curl" in error.lower() or "connection" in error.lower():
+                self._reply(msg,
+                    "Can't reach the LLM endpoint. Check that your LLM server is running.\n"
+                    "For Ollama: ollama serve\n"
+                    "Or switch to federation mode: /mode")
+            else:
+                self._reply(msg, f"LLM error: {error}")
 
     def _reply(self, msg: IncomingMessage, text: str) -> None:
         """Send a reply back to the channel the message came from."""

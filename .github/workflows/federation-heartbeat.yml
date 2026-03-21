@@ -1,0 +1,69 @@
+name: Federation Heartbeat
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'  # Every 6 hours
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  heartbeat:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout steward-protocol
+        uses: actions/checkout@v4
+        with:
+          repository: kimeisele/steward-protocol
+          path: _federation/steward-protocol
+          token: ${{ secrets.FEDERATION_PAT }}
+
+      - name: Checkout agent-internet
+        uses: actions/checkout@v4
+        with:
+          repository: kimeisele/agent-internet
+          path: _federation/agent-internet
+          token: ${{ secrets.FEDERATION_PAT }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run tests
+        run: python -m pytest tests/test_mahaclaw.py -q
+
+      - name: Send heartbeat to federation
+        run: |
+          python -c "
+          from mahaclaw.intercept import parse_intent
+          from mahaclaw.tattva import classify
+          from mahaclaw.rama import encode_rama
+          from mahaclaw.lotus import resolve_route
+          from mahaclaw.envelope import build_and_enqueue
+          import json
+
+          raw = json.dumps({
+              'intent': 'heartbeat',
+              'target': 'agent-city',
+              'payload': {'status': 'alive', 'node': 'mahaclaw', 'tests': 'passing'},
+              'priority': 'tamas',
+          })
+          intent = parse_intent(raw)
+          tattva = classify(intent)
+          rama = encode_rama(intent, tattva)
+          route = resolve_route(intent, rama)
+          eid, cid = build_and_enqueue(intent, rama, route)
+          print(f'heartbeat sent: {eid[:16]}')
+          "
+
+      - name: Commit outbox
+        run: |
+          git config user.name "mahaclaw-bot"
+          git config user.email "bot@mahaclaw"
+          git add nadi_outbox.json || true
+          git diff --cached --quiet || \
+            git commit -m "heartbeat: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          git push || true

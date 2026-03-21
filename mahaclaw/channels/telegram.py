@@ -156,7 +156,9 @@ class TelegramAdapter:
             name = bot.get("username", "unknown")
             print(f"  telegram: connected as @{name}")
         else:
-            print("  telegram: warning — could not verify bot token")
+            print("  telegram: could not verify bot token", file=__import__('sys').stderr)
+            print("  Check that your TELEGRAM_BOT_TOKEN is correct.", file=__import__('sys').stderr)
+            print("  Get a new one from @BotFather if needed.", file=__import__('sys').stderr)
 
         self._running = True
         while self._running:
