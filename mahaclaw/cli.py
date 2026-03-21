@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import sys
 
+from .buddhi import VerdictAction, check_intent
 from .intercept import parse_intent
 from .tattva import classify
 from .rama import encode_rama
@@ -44,6 +45,9 @@ def main() -> int:
 
     try:
         intent = parse_intent(raw)
+        verdict = check_intent(intent)
+        if verdict.action == VerdictAction.ABORT:
+            raise ValueError(f"Buddhi ABORT: {verdict.reason}")
         tattva = classify(intent)
         rama = encode_rama(intent, tattva)
         route = resolve_route(intent, rama)

@@ -145,11 +145,14 @@ def is_legacy_envelope(data: dict) -> bool:
 
 
 def build_and_enqueue(intent: dict, rama: RAMASignal, route: dict) -> tuple[str, str]:
-    """Build envelope and append to outbox.
+    """Build envelope, sign with Ahamkara, and append to outbox.
 
     Returns (envelope_id, correlation_id).
     """
+    from .ahamkara import stamp_envelope
+
     envelope = build_envelope(intent, rama, route)
+    envelope = stamp_envelope(envelope)
     outbox = _read_outbox()
     outbox.append(envelope)
     _write_outbox(outbox)

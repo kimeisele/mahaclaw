@@ -25,6 +25,7 @@ import sys
 import time
 from pathlib import Path
 
+from .buddhi import VerdictAction, check_intent
 from .intercept import parse_intent
 from .tattva import classify
 from .rama import encode_rama
@@ -149,25 +150,18 @@ async def _process_message(text: str) -> dict:
     data = json.loads(text)
 
     # If it's a raw text message (from chat), wrap it as an intent
+    # Manas routes by seed (SHA-256 of intent string), so pass the raw
+    # message text as intent — the seed will reflect the actual content.
     if "intent" not in data and "message" in data:
         target = data.get("target", "agent-research")
         msg = data["message"]
-        # Auto-detect intent
-        intent_type = "inquiry"
-        lower = msg.lower()
-        if any(kw in lower for kw in ("build", "code", "compile", "debug")):
-            intent_type = "code_analysis"
-        elif any(kw in lower for kw in ("govern", "vote", "policy")):
-            intent_type = "governance_proposal"
-        elif any(kw in lower for kw in ("find", "discover", "search", "who")):
-            intent_type = "discover_peers"
-        elif any(kw in lower for kw in ("status", "ping", "health")):
-            intent_type = "heartbeat"
-
-        data = {"intent": intent_type, "target": target, "payload": {"message": msg}}
+        data = {"intent": msg, "target": target, "payload": {"message": msg}}
 
     raw = json.dumps(data)
     intent = parse_intent(raw)
+    verdict = check_intent(intent)
+    if verdict.action == VerdictAction.ABORT:
+        return {"ok": False, "error": f"Buddhi ABORT: {verdict.reason}"}
     tattva = classify(intent)
     rama = encode_rama(intent, tattva)
     route = resolve_route(intent, rama)

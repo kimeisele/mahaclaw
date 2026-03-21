@@ -67,40 +67,47 @@ from mahaclaw.tattva import classify, ELEMENTS
 
 
 class TestTattvaGate:
-    def test_heartbeat_is_vayu(self):
+    def test_seed_deterministic(self):
+        """Same intent always produces same classification (seed-based)."""
         intent = {"intent": "heartbeat", "target": "agent-city"}
-        result = classify(intent)
-        assert result.dominant == "vayu"
-        assert result.zone == "general"
+        r1 = classify(intent)
+        r2 = classify(intent)
+        assert r1.dominant == r2.dominant
+        assert r1.zone == r2.zone
+        assert r1.affinity == r2.affinity
 
-    def test_inquiry_is_jala(self):
-        intent = {"intent": "inquiry", "target": "agent-research"}
-        result = classify(intent)
-        assert result.dominant == "jala"
-        assert result.zone == "research"
+    def test_different_intents_may_differ(self):
+        """Different intent strings produce (possibly) different seeds."""
+        r1 = classify({"intent": "heartbeat", "target": "x"})
+        r2 = classify({"intent": "code_analysis", "target": "x"})
+        # They CAN be equal by hash collision, but test the pipeline runs
+        assert r1.dominant in ELEMENTS
+        assert r2.dominant in ELEMENTS
 
-    def test_code_is_prithvi(self):
-        intent = {"intent": "code_analysis", "target": "steward"}
-        result = classify(intent)
+    def test_heartbeat_seed_routing(self):
+        """heartbeat hashes to position 10 → karma → DEBUG → engineering."""
+        result = classify({"intent": "heartbeat", "target": "agent-city"})
         assert result.dominant == "prithvi"
         assert result.zone == "engineering"
 
-    def test_governance_is_agni(self):
-        intent = {"intent": "governance_proposal", "target": "agent-world"}
-        result = classify(intent)
+    def test_inquiry_seed_routing(self):
+        """inquiry hashes to position 5 → dharma → REVIEW → governance."""
+        result = classify({"intent": "inquiry", "target": "agent-research"})
         assert result.dominant == "agni"
         assert result.zone == "governance"
 
-    def test_discover_is_akasha(self):
-        intent = {"intent": "discover_peers", "target": "agent-internet"}
-        result = classify(intent)
-        assert result.dominant == "akasha"
-        assert result.zone == "discovery"
+    def test_code_analysis_seed_routing(self):
+        """code_analysis hashes to position 11 → karma → DEBUG → engineering."""
+        result = classify({"intent": "code_analysis", "target": "steward"})
+        assert result.dominant == "prithvi"
+        assert result.zone == "engineering"
 
-    def test_unknown_defaults_vayu(self):
-        intent = {"intent": "something_random", "target": "x"}
-        result = classify(intent)
-        assert result.dominant == "vayu"
+    def test_valid_elements(self):
+        """All results use valid elements and zones."""
+        for intent_str in ("heartbeat", "inquiry", "test", "governance", "random_xyz"):
+            r = classify({"intent": intent_str, "target": "x"})
+            assert r.dominant in ELEMENTS
+            assert r.zone in ("discovery", "general", "governance", "research", "engineering")
 
     def test_affinity_has_5_dims(self):
         intent = {"intent": "heartbeat", "target": "x"}
@@ -131,25 +138,31 @@ class TestRamaGate:
         d = r.to_dict()
         assert set(d.keys()) == {"element", "zone", "operation", "affinity", "guardian", "quarter", "guna", "position"}
 
-    def test_inquiry_maps_to_prahlada(self):
+    def test_inquiry_seed_position(self):
+        """inquiry hashes to position 5 → kumaras (dharma quarter)."""
         r = self._make("inquiry")
-        assert r.guardian == "prahlada"
-        assert r.quarter == "karma"
-        assert r.position == 9
+        assert r.position == 5
+        assert r.guardian == GUARDIANS[5]  # kumaras
+        assert r.quarter == "dharma"
 
-    def test_heartbeat_maps_to_vyasa(self):
+    def test_heartbeat_seed_position(self):
+        """heartbeat hashes to position 10 → janaka (karma quarter)."""
         r = self._make("heartbeat")
-        assert r.guardian == "vyasa"
-        assert r.quarter == "genesis"
+        assert r.position == 10
+        assert r.guardian == GUARDIANS[10]  # janaka
+        assert r.quarter == "karma"
 
     def test_parampara_vector(self):
         r = self._make("inquiry")
-        assert r.parampara_vector == (9 + 1) * 37 == 370
+        assert r.parampara_vector == (r.position + 1) * 37
         assert r.parampara_vector % 37 == 0  # connected
 
-    def test_unknown_defaults_prahlada(self):
-        r = self._make("something_unknown")
-        assert r.position == 9  # default
+    def test_position_deterministic(self):
+        """Same intent always produces same position (seed-based)."""
+        r1 = self._make("something_unknown")
+        r2 = self._make("something_unknown")
+        assert r1.position == r2.position
+        assert 0 <= r1.position < 16
 
 
 # ---------------------------------------------------------------------------
@@ -234,9 +247,9 @@ class TestEnvelopeGate:
         assert len(env["maha_header_hex"]) == 32
         assert env["ttl_ms"] == 24000
         assert env["ttl_s"] == 24.0
-        # RAMA metadata preserved in payload
+        # RAMA metadata preserved in payload (seed-based position)
         assert "_rama" in env["payload"]
-        assert env["payload"]["_rama"]["guardian"] == "prahlada"
+        assert env["payload"]["_rama"]["guardian"] in GUARDIANS
 
     def test_maha_header_deterministic(self):
         h1 = build_maha_header_hex("a", "b", "c", "vyana", "rajas", 24000)
@@ -275,12 +288,13 @@ class TestFullPipeline:
 
         # Gate 1
         intent = parse_intent(raw)
-        # Gate 2
+        # Gate 2 (seed-based: inquiry → pos 5 → dharma → REVIEW → governance)
         tattva = classify(intent)
-        assert tattva.dominant == "jala"
+        assert tattva.dominant in ELEMENTS
         # Gate 3
         rama = encode_rama(intent, tattva)
-        assert rama.guardian == "prahlada"
+        assert rama.guardian in GUARDIANS
+        assert 0 <= rama.position < 16
         # Gate 4
         route = resolve_route(intent, rama)
         assert "agent-research" in route["target_city_id"]
@@ -294,7 +308,7 @@ class TestFullPipeline:
         assert len(data) == 1
         assert data[0]["source_city_id"] == "mahaclaw"
         assert data[0]["payload"]["question"] == "What is dark matter?"
-        assert data[0]["payload"]["_rama"]["element"] == "jala"
+        assert data[0]["payload"]["_rama"]["element"] in ELEMENTS
 
 
 # ---------------------------------------------------------------------------
@@ -369,8 +383,8 @@ from mahaclaw.cli import main; raise SystemExit(main())
         assert resp["ok"] is True
         assert resp["envelope_id"].startswith("env_")
         assert "correlation_id" in resp
-        assert resp["element"] == "vayu"
-        assert resp["guardian"] == "vyasa"
+        assert resp["element"] in ELEMENTS
+        assert resp["guardian"] in GUARDIANS
 
     def test_cli_empty_input(self):
         result = subprocess.run(
@@ -521,7 +535,8 @@ from mahaclaw.chat import main; raise SystemExit(main())
         )
         assert result.returncode == 0, result.stderr
         assert "target: agent-research" in result.stdout
-        assert "jala/research" in result.stdout
+        # Seed-based routing — check that some element/zone was reported
+        assert "/" in result.stdout  # element/zone format
         assert "bye" in result.stdout
 
     def test_chat_send_writes_outbox(self, tmp_path):
@@ -780,7 +795,7 @@ class TestGateway:
 
         result = await _process_message('{"intent":"inquiry","target":"agent-research","wait":0}')
         assert result["ok"] is True
-        assert result["element"] == "jala"
+        assert result["element"] in ELEMENTS
 
     @pytest.mark.asyncio
     async def test_process_message_chat(self, tmp_path, monkeypatch):
@@ -794,7 +809,7 @@ class TestGateway:
 
         result = await _process_message('{"message":"What is dark matter?","target":"agent-research","wait":0}')
         assert result["ok"] is True
-        assert result["element"] == "jala"
+        assert result["element"] in ELEMENTS
 
     @pytest.mark.asyncio
     async def test_gateway_http_health(self, tmp_path, monkeypatch):
@@ -982,12 +997,10 @@ from mahaclaw.channels.bridge import ChannelBridge, BridgeConfig, _detect_intent
 
 
 class TestChannelBridge:
-    def test_detect_intent_types(self):
-        assert _detect_intent("build something") == "code_analysis"
-        assert _detect_intent("what's the governance policy?") == "governance_proposal"
-        assert _detect_intent("find agents nearby") == "discover_peers"
-        assert _detect_intent("are you alive?") == "heartbeat"
-        assert _detect_intent("tell me about quantum physics") == "inquiry"
+    def test_detect_intent_passthrough(self):
+        """_detect_intent now returns raw text (Manas routes by seed)."""
+        assert _detect_intent("build something") == "build something"
+        assert _detect_intent("tell me about quantum physics") == "tell me about quantum physics"
 
     def test_bridge_command_help(self, tmp_path):
         replies = []
@@ -1047,7 +1060,8 @@ class TestChannelBridge:
         bridge.handle_message(msg)
 
         assert len(replies) == 1
-        assert "jala/research" in replies[0]
+        # Seed-based routing — check element/zone format present
+        assert "/" in replies[0]  # "[element/zone] Sent to ..."
 
         # Verify outbox got an envelope
         data = json.loads(outbox.read_text())
@@ -1279,8 +1293,337 @@ class TestStewardOnlyBridge:
         assert "locked" in replies[0].lower()
         bridge.close()
 
-    def test_detect_intent_research_keywords(self):
-        assert _detect_intent("research quantum computing") == "inquiry"
-        assert _detect_intent("investigate this bug") == "inquiry"
-        assert _detect_intent("what agents are in the network?") == "discover_peers"
-        assert _detect_intent("refactor the code") == "code_analysis"
+    def test_detect_intent_passthrough(self):
+        """_detect_intent returns raw text (Manas routes by seed, not keywords)."""
+        assert _detect_intent("research quantum computing") == "research quantum computing"
+        assert _detect_intent("investigate this bug") == "investigate this bug"
+
+
+# ---------------------------------------------------------------------------
+# Buddhi (Safety Gate)
+# ---------------------------------------------------------------------------
+
+from mahaclaw.buddhi import (
+    VerdictAction, BuddhiVerdict, Impression, Chitta,
+    check_intent, detect_patterns,
+)
+
+
+class TestBuddhiGate:
+    def test_safe_intent_continues(self):
+        intent = {"intent": "inquiry", "target": "agent-research", "priority": "rajas", "ttl_ms": 24000}
+        v = check_intent(intent)
+        assert v.action == VerdictAction.CONTINUE
+
+    def test_blocked_intent_aborts(self):
+        intent = {"intent": "delete_all", "target": "x", "priority": "rajas", "ttl_ms": 24000}
+        v = check_intent(intent)
+        assert v.action == VerdictAction.ABORT
+
+    def test_dangerous_substring_aborts(self):
+        intent = {"intent": "rm -rf everything", "target": "x", "priority": "rajas", "ttl_ms": 24000}
+        v = check_intent(intent)
+        assert v.action == VerdictAction.ABORT
+
+    def test_invalid_priority_redirects(self):
+        intent = {"intent": "inquiry", "target": "x", "priority": "mega", "ttl_ms": 24000}
+        v = check_intent(intent)
+        assert v.action == VerdictAction.REDIRECT
+
+    def test_negative_ttl_redirects(self):
+        intent = {"intent": "inquiry", "target": "x", "priority": "rajas", "ttl_ms": -1}
+        v = check_intent(intent)
+        assert v.action == VerdictAction.REDIRECT
+
+    def test_restricted_target_high_priority_reflects(self):
+        intent = {"intent": "inquiry", "target": "steward", "priority": "suddha", "ttl_ms": 24000}
+        v = check_intent(intent)
+        assert v.action == VerdictAction.REFLECT
+
+    def test_narasimha_bypass_blocked(self):
+        intent = {"intent": "bypass_viveka", "target": "x", "priority": "rajas", "ttl_ms": 24000}
+        v = check_intent(intent)
+        assert v.action == VerdictAction.ABORT
+
+
+class TestGandhaDetection:
+    def test_no_patterns_on_empty(self):
+        assert detect_patterns([]) is None
+
+    def test_consecutive_errors_aborts(self):
+        imps = [Impression(name="bash", success=False, error="fail") for _ in range(5)]
+        v = detect_patterns(imps)
+        assert v is not None
+        assert v.action == VerdictAction.ABORT
+
+    def test_identical_calls_reflects(self):
+        imps = [Impression(name="bash", params_hash=42, success=False) for _ in range(3)]
+        v = detect_patterns(imps)
+        assert v is not None
+        assert v.action in (VerdictAction.REFLECT, VerdictAction.ABORT)
+
+    def test_blind_write_redirects(self):
+        imps = [Impression(name="edit_file", path="/foo.py", success=True)]
+        v = detect_patterns(imps, prior_reads=frozenset())
+        assert v is not None
+        assert v.action == VerdictAction.REDIRECT
+
+    def test_write_after_read_ok(self):
+        imps = [Impression(name="edit_file", path="/foo.py", success=True)]
+        v = detect_patterns(imps, prior_reads=frozenset({"/foo.py"}))
+        assert v is None
+
+    def test_high_error_ratio_reflects(self):
+        imps = [Impression(name=f"t{i}", success=(i == 0)) for i in range(5)]
+        v = detect_patterns(imps)
+        assert v is not None
+        assert v.action == VerdictAction.REFLECT
+
+
+class TestChitta:
+    def test_record_and_evaluate(self):
+        c = Chitta()
+        c.record(Impression(name="read_file", path="/x.py", success=True))
+        assert "/x.py" in c.prior_reads
+        v = c.evaluate()
+        assert v.action == VerdictAction.CONTINUE
+
+    def test_clear_preserves_prior_reads(self):
+        c = Chitta()
+        c.record(Impression(name="read_file", path="/x.py", success=True))
+        c.clear()
+        assert "/x.py" in c.prior_reads
+        assert len(c.impressions) == 0
+
+
+# ---------------------------------------------------------------------------
+# Ahamkara (Identity / Signing)
+# ---------------------------------------------------------------------------
+
+from mahaclaw.ahamkara import (
+    hmac_sign, hmac_verify, hmac_fingerprint,
+    sign_envelope, verify_envelope, stamp_envelope,
+    get_identity, _canonical_content, KEYS_DIR,
+)
+import shutil
+
+
+class TestAhamkara:
+    @pytest.fixture(autouse=True)
+    def _clean_keys(self, tmp_path, monkeypatch):
+        """Use temp directory for keys so tests don't pollute real keys."""
+        keys_dir = tmp_path / ".mahaclaw" / "keys"
+        monkeypatch.setattr("mahaclaw.ahamkara.KEYS_DIR", keys_dir)
+        monkeypatch.setattr("mahaclaw.ahamkara.HMAC_KEY_FILE", keys_dir / "hmac.key")
+        monkeypatch.setattr("mahaclaw.ahamkara.ECDSA_PRIVATE_FILE", keys_dir / "private.pem")
+        monkeypatch.setattr("mahaclaw.ahamkara.ECDSA_PUBLIC_FILE", keys_dir / "public.pem")
+
+    def test_hmac_sign_and_verify(self):
+        sig = hmac_sign("hello")
+        assert hmac_verify("hello", sig)
+        assert not hmac_verify("tampered", sig)
+
+    def test_hmac_fingerprint_stable(self):
+        fp1 = hmac_fingerprint()
+        fp2 = hmac_fingerprint()
+        assert fp1 == fp2
+        assert len(fp1) == 16
+
+    def test_stamp_envelope_adds_fields(self):
+        env = {
+            "source": "mahaclaw", "target": "steward",
+            "operation": "inquiry", "nadi_type": "vyana",
+            "priority": 5, "ttl_ms": 24000,
+            "envelope_id": "env_abc", "correlation_id": "corr_123",
+        }
+        stamped = stamp_envelope(env)
+        assert "_signature" in stamped
+        assert "_signer_fingerprint" in stamped
+        assert "_signing_method" in stamped
+        assert len(stamped["_signer_fingerprint"]) == 16
+
+    def test_verify_stamped_envelope(self):
+        env = {
+            "source": "mahaclaw", "target": "steward",
+            "operation": "inquiry", "nadi_type": "vyana",
+            "priority": 5, "ttl_ms": 24000,
+            "envelope_id": "env_abc", "correlation_id": "corr_123",
+        }
+        stamped = stamp_envelope(env)
+        assert verify_envelope(stamped)
+
+    def test_tampered_envelope_fails(self):
+        env = {
+            "source": "mahaclaw", "target": "steward",
+            "operation": "inquiry", "nadi_type": "vyana",
+            "priority": 5, "ttl_ms": 24000,
+            "envelope_id": "env_abc", "correlation_id": "corr_123",
+        }
+        stamped = stamp_envelope(env)
+        stamped["target"] = "evil-agent"
+        assert not verify_envelope(stamped)
+
+    def test_identity_method(self):
+        ident = get_identity()
+        assert ident.signing_method in ("ecdsa", "hmac-sha256")
+        assert len(ident.fingerprint) == 16
+
+    def test_canonical_content_deterministic(self):
+        env = {"source": "a", "target": "b", "operation": "c",
+               "nadi_type": "d", "priority": 1, "ttl_ms": 2,
+               "envelope_id": "e", "correlation_id": "f", "extra": "ignored"}
+        c1 = _canonical_content(env)
+        c2 = _canonical_content(env)
+        assert c1 == c2
+        assert "extra" not in c1
+
+
+from mahaclaw.manas import perceive
+
+
+class TestManaSeedPipeline:
+    """Test the pure seed-based Manas routing (zero keywords)."""
+
+    def test_seed_deterministic(self):
+        """Same text always produces same seed."""
+        from mahaclaw.manas import _compute_seed
+        s1 = _compute_seed("hello world")
+        s2 = _compute_seed("hello world")
+        assert s1 == s2
+
+    def test_seed_case_insensitive(self):
+        """Seeds are case-insensitive (text.lower())."""
+        from mahaclaw.manas import _compute_seed
+        assert _compute_seed("Hello") == _compute_seed("hello")
+
+    def test_position_in_range(self):
+        """Position is always 0-15."""
+        from mahaclaw.manas import _compute_seed, _seed_to_position
+        for text in ("a", "abc", "inquiry", "heartbeat", "xyzzy", "test_long_string_here"):
+            seed = _compute_seed(text)
+            pos = _seed_to_position(seed)
+            assert 0 <= pos < 16, f"{text} → pos {pos}"
+
+    def test_perceive_returns_all_fields(self):
+        """ManasPerception has all required fields."""
+        p = perceive("test intent")
+        assert hasattr(p, "action")
+        assert hasattr(p, "guna")
+        assert hasattr(p, "function")
+        assert hasattr(p, "approach")
+        assert hasattr(p, "position")
+        assert 0 <= p.position < 16
+
+    def test_perceive_deterministic(self):
+        """Same intent → same perception."""
+        p1 = perceive("hello federation")
+        p2 = perceive("hello federation")
+        assert p1 == p2
+
+    def test_guna_from_position(self):
+        """Guna is derived from position via opcode sets."""
+        from mahaclaw.manas import _position_to_guna, IntentGuna
+        from mahaclaw.manas import SATTVA_POSITIONS, TAMAS_POSITIONS, RAJAS_POSITIONS
+        for pos in range(16):
+            g = _position_to_guna(pos)
+            if pos in SATTVA_POSITIONS:
+                assert g == IntentGuna.SATTVA
+            elif pos in TAMAS_POSITIONS:
+                assert g == IntentGuna.TAMAS
+            else:
+                assert g == IntentGuna.RAJAS
+
+    def test_function_from_position(self):
+        """Function is derived from HARE/KRISHNA/RAMA position sets."""
+        from mahaclaw.manas import _position_to_function, Function
+        from mahaclaw.manas import HARE_POSITIONS, KRISHNA_POSITIONS, RAMA_POSITIONS
+        for pos in range(16):
+            f = _position_to_function(pos)
+            if pos in HARE_POSITIONS:
+                assert f == Function.CARRIER
+            elif pos in KRISHNA_POSITIONS:
+                assert f == Function.SOURCE
+            elif pos in RAMA_POSITIONS:
+                assert f == Function.DELIVERER
+
+    def test_approach_from_position(self):
+        """Approach = quarter from position // 4."""
+        from mahaclaw.manas import _position_to_approach, Approach
+        assert _position_to_approach(0) == Approach.GENESIS
+        assert _position_to_approach(3) == Approach.GENESIS
+        assert _position_to_approach(4) == Approach.DHARMA
+        assert _position_to_approach(7) == Approach.DHARMA
+        assert _position_to_approach(8) == Approach.KARMA
+        assert _position_to_approach(11) == Approach.KARMA
+        assert _position_to_approach(12) == Approach.MOKSHA
+        assert _position_to_approach(15) == Approach.MOKSHA
+
+    def test_action_from_approach_chain(self):
+        """ActionType derives from approach affinity (primary)."""
+        from mahaclaw.manas import _APPROACH_TO_ACTION, Approach, ActionType
+        assert _APPROACH_TO_ACTION[Approach.GENESIS] == ActionType.IMPLEMENT
+        assert _APPROACH_TO_ACTION[Approach.DHARMA] == ActionType.REVIEW
+        assert _APPROACH_TO_ACTION[Approach.KARMA] == ActionType.DEBUG
+        assert _APPROACH_TO_ACTION[Approach.MOKSHA] == ActionType.RESEARCH
+
+    def test_synth_transform_deterministic(self):
+        """MahaModularSynth transform is deterministic."""
+        from mahaclaw.manas import _synth_transform
+        assert _synth_transform(42) == _synth_transform(42)
+        assert _synth_transform(0) != _synth_transform(1)  # different inputs differ
+
+    def test_phonetic_vibration(self):
+        """Phonetic vibration is deterministic and position-weighted."""
+        from mahaclaw.manas import _phonetic_vibration
+        v1 = _phonetic_vibration("abc")
+        v2 = _phonetic_vibration("abc")
+        assert v1 == v2
+        # "ab" and "ba" should differ (position-weighted)
+        assert _phonetic_vibration("ab") != _phonetic_vibration("ba")
+
+    def test_no_keywords_in_manas(self):
+        """Verify _KEYWORD_ACTIONS does not exist in manas module."""
+        import mahaclaw.manas as m
+        assert not hasattr(m, "_KEYWORD_ACTIONS")
+
+    def test_mahamantra_constants(self):
+        """Verify Mahamantra constants match steward-protocol."""
+        from mahaclaw.manas import WORDS, MAHA_QUANTUM, PARAMPARA, QUARTERS
+        assert WORDS == 16
+        assert MAHA_QUANTUM == 137
+        assert PARAMPARA == 37
+        assert QUARTERS == 4
+
+
+class TestAhamkaraInPipeline:
+    """Test that Ahamkara is wired into the envelope pipeline."""
+
+    @pytest.fixture(autouse=True)
+    def _clean(self, tmp_path, monkeypatch):
+        keys_dir = tmp_path / ".mahaclaw" / "keys"
+        monkeypatch.setattr("mahaclaw.ahamkara.KEYS_DIR", keys_dir)
+        monkeypatch.setattr("mahaclaw.ahamkara.HMAC_KEY_FILE", keys_dir / "hmac.key")
+        monkeypatch.setattr("mahaclaw.ahamkara.ECDSA_PRIVATE_FILE", keys_dir / "private.pem")
+        monkeypatch.setattr("mahaclaw.ahamkara.ECDSA_PUBLIC_FILE", keys_dir / "public.pem")
+        outbox = tmp_path / "nadi_outbox.json"
+        monkeypatch.setattr("mahaclaw.envelope.OUTBOX_PATH", outbox)
+
+    def test_build_and_enqueue_stamps(self):
+        from mahaclaw.intercept import parse_intent
+        from mahaclaw.tattva import classify
+        from mahaclaw.rama import encode_rama
+        from mahaclaw.lotus import resolve_route
+        from mahaclaw.envelope import build_and_enqueue, OUTBOX_PATH
+
+        raw = json.dumps({"intent": "inquiry", "target": "agent-research", "payload": {"q": "test"}})
+        intent = parse_intent(raw)
+        tattva = classify(intent)
+        rama = encode_rama(intent, tattva)
+        route = resolve_route(intent, rama)
+        eid, cid = build_and_enqueue(intent, rama, route)
+
+        outbox = json.loads(OUTBOX_PATH.read_text())
+        assert len(outbox) >= 1
+        last = outbox[-1]
+        assert "_signature" in last
+        assert "_signer_fingerprint" in last

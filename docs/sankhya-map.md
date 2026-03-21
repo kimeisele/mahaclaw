@@ -1,0 +1,300 @@
+# Sankhya-25 → Federation Codebase Map
+
+> Produced by auditing all 8 kimeisele repos via GitHub API.
+> This map IS the architecture. It replaces all previous architecture docs.
+
+## The Principle
+
+LLM (Jiva) = 1 of 25 elements. Everything that CAN be deterministic IS deterministic.
+
+---
+
+## 1. Purusha (पुरुष) — Pure Consciousness / Observer
+
+- **steward-protocol**: `vibe_core/state/persona.py` → `AgentPersona` (Layer 3: PURUSHA)
+- Human operator. Intent comes from outside. Not code per se — but the persona layer models it.
+- **Maha Claw**: Channel adapters (telegram, webchat) are the Purusha's voice into the system.
+- **Status**: ✅ Working
+
+## 2. Prakriti (प्रकृति) — Primordial Nature / Unified State
+
+- **steward-protocol**: `vibe_core/state/prakriti.py` → `Prakriti(PrakritiProtocol)` — 3-layer state (STHULA/PRANA/PURUSHA), singleton, DI-registered, 13+ snapshots on disk
+- **steward-protocol**: `vibe_core/protocols/mahajanas/kapila/samkhya.py` → `PrakritiElement` enum (values 1–24)
+- **steward**: `steward/kshetra.py` → `STEWARD_KSHETRA` — maps all 25 elements to steward modules
+- **agent-city**: `city/pokedex.py` → `Pokedex` (SQLite agent registry), `city/prana_engine.py` → `PranaEngine` (O(1) memory + SQL flush)
+- **Maha Claw**: `session.py` → `SessionManager` (SQLite hash-chained ledger) — local state only
+- **Wire**: session.py needs to speak Prakriti's snapshot format
+- **Status**: ✅ Working in steward-protocol + agent-city. Maha Claw has local stub.
+
+## 3. Mahat/Buddhi (बुद्धि) — Intellect / Decision Gate
+
+Two implementations in steward-protocol:
+
+- **steward-protocol (substrate)**: `vibe_core/mahamantra/substrate/buddhi.py` → `MahaBuddhi` — `think()` → `BuddhiResult`, `evaluate()` → `BuddhiEvaluation`
+- **steward-protocol (plugin)**: `vibe_core/plugins/opus_assistant/manas/buddhi.py` → `Buddhi` — combines `VivekaSense` (priority scoring) + `DharmaSense` (ethical filtering) → `BuddhiVerdict(approved, dharmic, dharma_reason)`. Unapproved intents blocked before execution.
+- **steward**: `steward/buddhi.py` → `Buddhi` — phase-machine ORIENT→EXECUTE→VERIFY→COMPLETE, `BuddhiDirective`/`BuddhiVerdict`, token budget control
+- **agent-city**: `city/gateway.py` → calls `get_buddhi()`, `city/council.py` → governance proposals, `city/brain.py` → `Brain` (deliberative, reads but does NOT act)
+- **agent-city**: `city/immune.py` → `CytokineBreaker` — circuit breaker aborts healing if test failures increase
+- **Maha Claw**: ❌ NOT WIRED. Pipeline has no Buddhi gate. Every intent passes through unchecked.
+- **Wire**: Import `MahaBuddhi.think()` or reimplement verdict logic. Add gate between VALIDATE and EXECUTE.
+- **Status**: ✅ Working in steward + steward-protocol. ❌ Missing in Maha Claw.
+
+## 4. Ahamkara (अहंकार) — Ego / Identity / Crypto Signing
+
+- **steward-protocol**: `vibe_core/steward/crypto.py` → `generate_keys()`, `sign_content()`, `verify_signature()` — ECDSA NIST256p, keys in `.steward/keys/`
+- **steward-protocol**: `vibe_core/plugins/opus_assistant/manas/cortex/mukha.py` → `AgentIdentity`, `IdentityScanner`, `MukhaGenerator`
+- **steward**: `steward/identity.py` → `StewardIdentity` — SHA-256 fingerprint from `STEWARD_IDENTITY_SEED`
+- **agent-city**: `city/identity.py` → `AgentIdentity` (ECDSA NIST256p), `city/claims.py` → `ClaimLevel` (DISCOVERED→CRYPTO_VERIFIED)
+- **Maha Claw**: ❌ NOT WIRED. MahaHeader uses SHA-256 hash but no ECDSA signing.
+- **Wire**: Import crypto.py or reimplement ECDSA signing for envelopes. Ahamkara = every envelope is signed.
+- **Status**: ✅ Working in steward + agent-city. ❌ Missing in Maha Claw.
+
+## 5. Manas (मनस्) — Mind / Deterministic Router
+
+- **steward-protocol**: `vibe_core/plugins/opus_assistant/manas/cognitive_kernel.py` → `CognitiveKernel` — OODA loop (Observe→Orient→Decide→Act), 10 cortex modules
+- **steward-protocol**: `vibe_core/mahamantra/substrate/manas/manas_core.py` → `MahaManas` — `perceive()`, `decide()`, `record_outcome()`
+- **steward-protocol**: `config/manas.yaml` — config-driven routing
+- **steward-protocol**: `MANAS.md` — full architecture doc, 8 senses, intent lifecycle, handler routing
+- **steward**: `steward/antahkarana/manas.py` → `Manas` — `MahaCompression.decode_samskara_intent()` for guna, `MahaBuddhi.think()` for function → `ManasPerception(action, guna, function, approach)`. Zero LLM.
+- **agent-city**: `city/attention.py` → `CityAttention` (O(1) intent→handler via `MahaAttention`), `city/router.py` → `CityRouter` (cap/dom/tier routing), `city/signal_router.py` → 5D coordinate routing
+- **Maha Claw**: `tattva.py` → static `_AFFINITY_RULES` substring match. Primitive. No OODA, no Manas integration.
+- **Wire**: Replace `_AFFINITY_RULES` with `MahaManas.perceive()` + `MahaManas.decide()` logic. Or at minimum import the `ManasPerception` output format.
+- **Status**: ✅ Rich in steward + steward-protocol. ⚠️ Maha Claw has stub only.
+
+## 6. Chitta (चित्त) — Memory / Impression Store
+
+- **steward**: `steward/antahkarana/chitta.py` → `Chitta` — stores tool-execution impressions (Samskaras), derives execution phase, cross-turn awareness via `prior_reads`
+- **steward-protocol**: Part of Prakriti's PRANA layer
+- **Maha Claw**: `session.py` ledger entries (message_in/out, pipeline, error, response) = proto-Chitta
+- **Wire**: Align ledger entry format with Chitta's impression model
+- **Status**: ✅ steward. ⚠️ Maha Claw partial (ledger exists but no impression derivation).
+
+---
+
+## Tanmatras — 5 Subtle Elements (Input Signals)
+
+### 7. Shabda (शब्द) — Sound / Signal
+
+- **steward-protocol**: `vibe_core/plugins/opus_assistant/manas/cortex/veda.py` → `class Shabda` — tokenize, detect language, extract keywords
+- **steward**: `vibe_core.steward.bus` → `SignalBus` — inter-component events
+- **Maha Claw**: `intercept.py` parse_intent = proto-Shabda (tokenize JSON input)
+- **Status**: ✅ steward-protocol. ⚠️ Maha Claw has parse-only stub.
+
+### 8. Sparsha (स्पर्श) — Touch / Context Parse
+
+- **steward-protocol**: `veda.py` Phase 2 → `class Artha` — semantic meaning, map tokens to intents
+- **steward**: `steward/loop/engine.py` → `AgentLoop._extract_tool_calls`
+- **Maha Claw**: channel bridge `_detect_intent()` = proto-Sparsha
+- **Status**: ✅ steward. ⚠️ Maha Claw partial.
+
+### 9. Rupa (रूप) — Form / Display
+
+- **steward-protocol**: `cortex/mandala.py` → `ConfigWeaver`, `FractalManifest`
+- **steward**: `steward/__main__.py` → CLI display
+- **Maha Claw**: `chat.py` terminal output, `gateway.py` WebSocket frames
+- **Status**: ✅ Both. Maha Claw has working output.
+
+### 10. Rasa (रस) — Taste / Validation
+
+- **steward-protocol**: `veda.py` Phase 3 → `class Pratyaya` — trust validation, authorization, preconditions
+- **steward**: `AgentLoop._clamp_params` — parameter validation
+- **Maha Claw**: ❌ No trust/auth validation beyond JSON schema
+- **Wire**: Add Pratyaya-style trust gate
+- **Status**: ✅ steward-protocol. ❌ Missing in Maha Claw.
+
+### 11. Gandha (गन्ध) — Smell / Pattern Detection
+
+- **steward**: `steward/antahkarana/gandha.py` → `detect_patterns()` — detects stuck loops, error cascades, blind writes, duplicate reads, tool streaks, error ratio → `VerdictAction` (CONTINUE/REFLECT/REDIRECT/ABORT/INFO)
+- **steward-protocol**: `veda.py` Phase 4 → `class Karma` — execute + record
+- **Maha Claw**: ❌ No anomaly detection
+- **Wire**: Import gandha pattern detection for pipeline health
+- **Status**: ✅ steward. ❌ Missing in Maha Claw.
+
+---
+
+## Jnanendriyas — 5 Knowledge Senses (Perception)
+
+### 12. Shrotra (श्रोत्र) — Hearing / Message Reception
+
+- **steward**: `steward/senses/git_sense.py` → `GitSense`
+- **steward-protocol**: `cortex/samvada.py` → `SamvadaListener` — Unix socket bidirectional
+- **Maha Claw**: `channels/telegram.py` (long-polling), `gateway.py` (WebSocket), `daemon.py` (Unix socket), `cli.py` (stdin)
+- **Status**: ✅ Both. Maha Claw has 4 input channels.
+
+### 13. Tvak (त्वक्) — Touch / Context Sensing
+
+- **steward**: `steward/senses/project_sense.py` → `ProjectSense`
+- **steward-protocol**: `cortex/prakriti_sense.py` → `PrakritiSense` — git dirty/clean, guna classification
+- **Maha Claw**: `session.py` → conversation history, session state
+- **Status**: ✅ steward. ⚠️ Maha Claw has session but no project/system sensing.
+
+### 14. Chakshu (चक्षुस्) — Sight / Code Perception
+
+- **steward**: `steward/senses/code_sense.py` → `CodeSense` (AST analysis)
+- **steward-protocol**: `cortex/sutra_sense.py` → `SutraSense` — code/doc gap detection
+- **Maha Claw**: ❌ No file/code perception
+- **Wire**: Not needed for chat runtime. Future: skill output parsing.
+- **Status**: ✅ steward. N/A for Maha Claw (chat runtime, not code agent).
+
+### 15. Rasana (रसन) — Taste / Preference Learning
+
+- **steward**: `steward/senses/testing_sense.py` → `TestingSense` — code quality via tests
+- **steward-protocol**: `cortex/dharma_sense.py` → `DharmaSense` — ethical quality, bhakti score
+- **Maha Claw**: ❌ No preference learning
+- **Wire**: Could track user preferences via session history patterns
+- **Status**: ✅ steward. ❌ Missing in Maha Claw.
+
+### 16. Ghrana (घ्राण) — Smell / Anomaly Detection
+
+- **steward**: `steward/senses/health_sense.py` → `HealthSense` — file metrics, code entropy
+- **steward-protocol**: `cortex/jnana.py` → `JnanaHandler` — knowledge pattern detection
+- **steward**: Narasimha kill-switch in `steward/loop/tool_dispatch.py:check_tool_gates()` Gate 2 → `NarasimhaProtocol.audit_agent()`, `ThreatLevel` GREEN→APOCALYPSE, blocks at RED+
+- **Maha Claw**: ❌ No anomaly detection, no Narasimha
+- **Wire**: Import Narasimha threat assessment for tool sandbox
+- **Status**: ✅ steward. ❌ Missing in Maha Claw.
+
+---
+
+## Karmendriyas — 5 Action Organs (Tools)
+
+### 17. Vak (वाक्) — Speech / NADI Transport
+
+- **steward**: `steward/loop/engine.py` → `AgentLoop._call_llm`
+- **steward-protocol**: `cortex/shell.py` → `ShellCortex`, `samvada.py` → `SamvadaClient` ("The Mouth")
+- **agent-internet**: `transport.py` → `DeliveryEnvelope`, `router.py` → `RegistryRouter`
+- **Maha Claw**: ✅ 5-gate pipeline → `nadi_outbox.json`. This is DONE.
+- **Status**: ✅ Working end-to-end.
+
+### 18. Pani (पाणि) — Hands / Tool Execution
+
+- **steward-protocol**: `vibe_core/tools/tool_registry.py` → `ToolRegistry.execute`
+- **steward-protocol**: `cortex/silpa.py` → `SilpaArchitect` — AST transforms, safe refactoring
+- **Maha Claw**: `tools/sandbox.py` → `ToolSandbox` — allowlist shell, scoped filesystem
+- **Wire**: Sandbox exists but is NOT connected to the runtime pipeline. Bridge needs to invoke sandbox on tool-type intents.
+- **Status**: ✅ steward. ⚠️ Maha Claw has sandbox, not wired.
+
+### 19. Pada (पाद) — Feet / Navigation & Routing
+
+- **steward-protocol**: `vibe_core/mahamantra/adapters/attention.py` → `MahaAttention` — O(1) Lotus routing
+- **agent-city**: `city/router.py` → `CityRouter` (cap/dom/tier), `city/attention.py` → `CityAttention`
+- **agent-internet**: `router.py` → `RegistryRouter.resolve_next_hop()` — prefix-longest-match
+- **Maha Claw**: `lotus.py` → static route table from seed files. No dynamic discovery.
+- **Wire**: Add peer discovery / route refresh from federation heartbeats
+- **Status**: ✅ steward + agent-internet. ⚠️ Maha Claw static only.
+
+### 20. Payu (पायु) — Elimination / Garbage Collection
+
+- **steward**: `steward/context.py` → `SamskaraContext.compact` — context compaction
+- **steward-protocol**: `manas/shiva.py` → `ShivaLifecycleManager` — destroys stale intents
+- **Maha Claw**: ❌ No cleanup. Outbox grows forever. Sessions never expire.
+- **Wire**: Add outbox rotation, session expiry, stale envelope removal
+- **Status**: ✅ steward. ❌ Missing in Maha Claw.
+
+### 21. Upastha (उपस्थ) — Generation / Artifact Creation
+
+- **steward**: `steward/services.py` → `boot` — service wiring
+- **steward-protocol**: `cortex/sankalpa.py` → `SankalpaOrchestrator`, `intent_generator.py` → `IntentGenerator` — proactive strategy
+- **Maha Claw**: `skills/engine.py` → `SkillEngine` — skill discovery + dispatch
+- **Wire**: Connect skill output to envelope pipeline
+- **Status**: ✅ steward. ⚠️ Maha Claw has skills, partially wired.
+
+---
+
+## Mahabhutas — 5 Gross Elements (Infrastructure/Zones)
+
+### 22. Akasha (आकाश) — Ether / Network Field
+
+- **steward**: `vibe_core.steward.bus` → `SignalBus`
+- **steward-protocol**: `cortex/akasha.py` → `AkashaSense` — inter-agent network awareness
+- **agent-city**: Zone `discovery` (GENESIS quarter)
+- **Maha Claw**: `daemon.py` Unix socket + `gateway.py` WebSocket = the local network field
+- **Status**: ✅ Working.
+
+### 23. Vayu (वायु) — Air / Process Flow
+
+- **steward**: `steward/loop/engine.py` → `AgentLoop` — the main agent loop
+- **agent-city**: Zone capabilities: communicate, relay, announce
+- **Maha Claw**: The 5-gate pipeline IS the Vayu flow (intercept→tattva→rama→lotus→envelope)
+- **Status**: ✅ Working.
+
+### 24. Agni (अग्नि) — Fire / Compute / Transformation
+
+- **steward**: `steward/provider/` → `ProviderChamber` — 3-tier LLM routing (FLASH/STANDARD/PRO)
+- **agent-research**: `agent_research/jiva.py` → `ProviderChamber` with circuit breaker, 6 providers
+- **agent-city**: Zone `governance` (DHARMA quarter), capabilities: transform, audit, validate
+- **Maha Claw**: `llm.py` → provider-agnostic LLM client (curl-based, OpenAI-compat)
+- **Status**: ✅ Working.
+
+### 25. Jala (जल) — Water / Memory / Flow
+
+- **steward**: `steward/memory.py` → `PersistentMemory`
+- **agent-city**: Zone `research` (MOKSHA quarter), capabilities: connect, mediate, integrate
+- **agent-internet**: `transport.py` → the flow of envelopes between nodes
+- **Maha Claw**: `inbox.py` → response flow, `session.py` → memory
+- **Status**: ✅ Working.
+
+### 26. Prithvi (पृथ्वी) — Earth / Persistence / Storage
+
+- **steward**: `steward/state.py` → `save_conversation` — disk persistence (Phoenix pattern)
+- **agent-city**: Zone `engineering` (KARMA quarter), capabilities: build, maintain, stabilize
+- **Maha Claw**: `nadi_outbox.json`, `nadi_inbox.json`, `mahaclaw_sessions.db`
+- **Status**: ✅ Working.
+
+---
+
+## The 25th: Jiva (जीव) — Consciousness / LLM
+
+- **steward**: `steward/provider/` → `LLMProvider` — the LLM itself
+- **agent-research**: `agent_research/jiva.py` → `ProviderChamber` — multi-provider failover (Google Flash→Mistral→Groq→OpenRouter→Anthropic→OpenAI)
+- **steward-protocol**: `vibe_core/state/persona.py` → personas that shape the Jiva's behavior
+- **Maha Claw**: `llm.py` → curl-based OpenAI-compat client. Used ONLY in standalone/steward-only mode.
+- **Key insight**: In federation mode, Maha Claw does NOT invoke Jiva. It routes to federation agents who have their own Jiva. The LLM is on the other side of NADI.
+- **Status**: ✅ Working. Correctly positioned as 1-of-25.
+
+---
+
+## Additional Elements (Beyond Canonical 25)
+
+### Vedana — Health Pulse
+- **steward**: `steward/antahkarana/vedana.py` → `VedanaSignal` — composite health (0.0–1.0), guna derived from health
+- **Maha Claw**: ❌ No health pulse
+- **Wire**: Add basic health metric (uptime, error rate, queue depth)
+
+### KsetraJna — Meta-Observer
+- **steward**: `steward/antahkarana/ksetrajna.py` → `KsetraJna` → `BubbleSnapshot` — frozen peer-readable state digest
+- **Maha Claw**: `lotus.py` → `buddy_bubble()` is a proto-KsetraJna (exports routing snapshot)
+- **Wire**: Expand buddy_bubble to include session, health, pipeline state
+
+### Narasimha — Kill Switch
+- **steward**: `steward/loop/tool_dispatch.py` Gate 2 → `NarasimhaProtocol.audit_agent()`, `ThreatLevel` GREEN→APOCALYPSE
+- **Maha Claw**: `tools/sandbox.py` has allowlist + blocked commands = proto-Narasimha
+- **Wire**: Formalize threat levels, add to pipeline gate
+
+### Cetana — Autonomous Heartbeat
+- **steward**: `steward/cetana.py` → 4-phase MURALI cycle, adaptive frequency
+- **Maha Claw**: `federation-heartbeat.yml` GitHub Action = external Cetana
+- **Wire**: Add in-process heartbeat daemon thread
+
+---
+
+## Wiring Priority Matrix
+
+| Element | Status in Maha Claw | Priority | Action |
+|---------|-------------------|----------|--------|
+| **Buddhi** | ❌ Missing | **P0** | Add safety gate to pipeline |
+| **Ahamkara** | ❌ Missing | **P0** | Add ECDSA envelope signing |
+| **Manas** | ⚠️ Stub | **P1** | Replace _AFFINITY_RULES with MahaManas logic |
+| **Gandha** | ❌ Missing | **P1** | Add anomaly detection to pipeline |
+| **Pani** | ⚠️ Not wired | **P1** | Connect sandbox to runtime |
+| **Payu** | ❌ Missing | **P2** | Add outbox rotation + session expiry |
+| **Rasa** | ❌ Missing | **P2** | Add trust/auth validation |
+| **Narasimha** | ⚠️ Proto | **P2** | Formalize threat levels |
+| **Chitta** | ⚠️ Partial | **P2** | Align session with impression model |
+| **Vedana** | ❌ Missing | **P3** | Add health pulse |
+| **KsetraJna** | ⚠️ Proto | **P3** | Expand buddy_bubble |
+| **Cetana** | External | **P3** | Add in-process heartbeat |
+| **Rasana** | ❌ Missing | **P3** | Track user preferences |
+| **Vak** | ✅ Done | — | 5-gate pipeline works |
+| **Shrotra** | ✅ Done | — | 4 input channels work |
+| **Pada** | ⚠️ Static | **P2** | Dynamic route discovery |
+| **Upastha** | ⚠️ Partial | **P2** | Connect skill output to pipeline |

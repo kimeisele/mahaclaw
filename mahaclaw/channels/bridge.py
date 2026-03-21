@@ -18,6 +18,7 @@ import time
 from dataclasses import dataclass, field
 
 from . import IncomingMessage
+from ..buddhi import VerdictAction, check_intent
 from ..intercept import parse_intent
 from ..tattva import classify
 from ..rama import encode_rama
@@ -130,11 +131,10 @@ class ChannelBridge:
         session = self._sessions.get_or_create(msg.session_id)
         target = session.target or self._config.default_target
 
-        # Detect intent type from message content
-        intent_type = _detect_intent(msg.text)
-
+        # Pass raw message text as intent — Manas routes by seed (SHA-256),
+        # so the seed reflects the actual content. Zero keywords.
         raw = json.dumps({
-            "intent": intent_type,
+            "intent": msg.text,
             "target": target,
             "payload": {"message": msg.text},
             "priority": "rajas",
@@ -144,6 +144,10 @@ class ChannelBridge:
 
         try:
             intent = parse_intent(raw)
+            verdict = check_intent(intent)
+            if verdict.action == VerdictAction.ABORT:
+                self._reply(msg, f"Blocked: {verdict.reason}")
+                return
             tattva = classify(intent)
             rama = encode_rama(intent, tattva)
             route = resolve_route(intent, rama)
@@ -264,16 +268,5 @@ class ChannelBridge:
 
 
 def _detect_intent(text: str) -> str:
-    """Detect intent type from natural language message."""
-    lower = text.lower()
-    if any(kw in lower for kw in ("build", "code", "compile", "debug", "test", "fix bug", "refactor")):
-        return "code_analysis"
-    if any(kw in lower for kw in ("govern", "vote", "policy", "proposal", "regulation")):
-        return "governance_proposal"
-    if any(kw in lower for kw in ("research", "study", "paper", "analyze", "investigate")):
-        return "inquiry"
-    if any(kw in lower for kw in ("find", "discover", "search", "who", "list agents", "what agents")):
-        return "discover_peers"
-    if any(kw in lower for kw in ("status", "ping", "health", "alive", "heartbeat")):
-        return "heartbeat"
-    return "inquiry"
+    """Return the raw text as intent. Manas routes by seed, not keywords."""
+    return text

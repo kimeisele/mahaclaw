@@ -8,32 +8,8 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 
+from .manas import perceive
 from .tattva import TattvaResult
-
-# Mahajana position lookup keyed by intent category.
-# Positions 0-15 correspond to the 16 Mahamantra positions.
-_INTENT_POSITIONS: dict[str, int] = {
-    # GENESIS quarter (0-3) — system bootstrap
-    "heartbeat": 0,     # VYASA (HEAD) — SYS_WAKE
-    "ping": 1,          # BRAHMA — LOAD_ROOT
-    "status": 2,        # NARADA — ALLOC_MEM
-    "connect": 3,       # SHAMBHU — BIND_CTX
-    # DHARMA quarter (4-7) — truth & validation
-    "governance": 4,    # PRITHU (HEAD) — ASSERT_TRUTH
-    "policy": 5,        # KUMARAS — RESOLVE_REQ
-    "trust": 6,         # KAPILA — GARBAGE_COLLECT
-    "vote": 7,          # MANU — PULSE_SYNC
-    # KARMA quarter (8-11) — action & execution
-    "code": 8,          # PARASHURAMA (HEAD) — FETCH_RES
-    "inquiry": 9,       # PRAHLADA — EXEC_SERVICE
-    "analysis": 10,     # JANAKA — CHECK_DHARMA
-    "build": 11,        # BHISHMA — COMMIT_LOG
-    # MOKSHA quarter (12-15) — optimization & release
-    "discover": 12,     # NRISIMHA (HEAD) — CACHE_STATE
-    "explore": 13,      # BALI — OPTIMIZE
-    "search": 14,       # SHUKA — YIELD_CPU
-    "test": 15,         # YAMARAJA — RESET_IP
-}
 
 QUARTERS = ("genesis", "dharma", "karma", "moksha")
 
@@ -81,12 +57,12 @@ class RAMASignal:
 
 
 def _find_position(intent_str: str) -> int:
-    """Find the best Mahajana position for an intent string."""
-    for keyword, pos in _INTENT_POSITIONS.items():
-        if keyword in intent_str:
-            return pos
-    # Default: PRAHLADA (pos 9, EXEC_SERVICE) — the general worker
-    return 9
+    """Find the Mahajana position for an intent string via seed pipeline.
+
+    Uses Manas perception (pure seed, zero keywords) to derive position.
+    """
+    perception = perceive(intent_str)
+    return perception.position
 
 
 def encode_rama(intent: dict, tattva: TattvaResult) -> RAMASignal:
