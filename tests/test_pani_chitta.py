@@ -37,6 +37,7 @@ from mahaclaw.chitta import (
     Impression,
     ExecutionPhase,
     Detection,
+    GandhaCause,
     VerdictAction,
     detect_patterns,
     MAX_IDENTICAL_CALLS,
@@ -401,7 +402,7 @@ class TestGandhaConsecutiveErrors:
         d = detect_patterns(imps)
         assert d is not None
         assert d.severity == VerdictAction.ABORT
-        assert d.pattern == "consecutive_errors"
+        assert d.cause == GandhaCause.CONSECUTIVE_ERRORS
 
 
 class TestGandhaIdenticalCalls:
@@ -409,7 +410,7 @@ class TestGandhaIdenticalCalls:
         imps = [Impression("bash", 42, True) for _ in range(MAX_IDENTICAL_CALLS)]
         d = detect_patterns(imps)
         assert d is not None
-        assert d.pattern == "identical_calls"
+        assert d.cause == GandhaCause.IDENTICAL_CALLS
 
     def test_recovery_not_detected(self):
         """Last success after earlier failures = recovery, not stuck."""
@@ -432,7 +433,7 @@ class TestGandhaToolStreak:
         imps = [Impression("bash", i, True) for i in range(MAX_SAME_TOOL_STREAK)]
         d = detect_patterns(imps)
         assert d is not None
-        assert d.pattern == "tool_streak"
+        assert d.cause == GandhaCause.TOOL_STREAK
 
     def test_read_file_streak_exempt(self):
         """read_file streaks are legitimate (codebase exploration)."""
@@ -455,7 +456,7 @@ class TestGandhaErrorRatio:
         ]
         d = detect_patterns(imps)
         assert d is not None
-        assert d.pattern == "error_ratio"
+        assert d.cause == GandhaCause.ERROR_RATIO
 
 
 class TestGandhaBlindWrite:
@@ -463,7 +464,7 @@ class TestGandhaBlindWrite:
         imps = [Impression("write_file", 1, True, path="/new.py")]
         d = detect_patterns(imps)
         assert d is not None
-        assert d.pattern == "write_without_read"
+        assert d.cause == GandhaCause.WRITE_WITHOUT_READ
 
     def test_read_then_write_ok(self):
         imps = [

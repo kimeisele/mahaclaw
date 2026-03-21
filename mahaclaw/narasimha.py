@@ -9,23 +9,36 @@ when all other defenses have failed. It doesn't discriminate — it KILLS.
 String-matching blocklists, dangerous pattern detection, hard stops.
 This runs BEFORE Buddhi even sees the intent.
 
-Narasimha's responsibilities:
-  - Block known-dangerous intents (delete_all, rm_rf, shutdown)
-  - Block dangerous substrings (rm -rf, drop database)
-  - Hard ABORT — no suggestion, no redirect, just STOP
+ANAURALIA: Narasimha communicates via enums and identifiers, not prose.
+NarasimhaVerdict carries cause (enum) + matched (the exact token that triggered).
+No natural language between Narasimha and Buddhi.
 
 Buddhi does discrimination. Narasimha does protection.
 """
 from __future__ import annotations
 
+import enum
 from dataclasses import dataclass
+
+
+class NarasimhaCause(str, enum.Enum):
+    """Why Narasimha blocked. Structured — no prose."""
+    BLOCKED_INTENT = "blocked_intent"
+    DANGEROUS_PATTERN = "dangerous_pattern"
 
 
 @dataclass(frozen=True, slots=True)
 class NarasimhaVerdict:
-    """Narasimha's kill-switch verdict."""
+    """Narasimha's kill-switch verdict.
+
+    ANAURALIA: No reason strings. Only:
+      - blocked: bool
+      - cause: enum (WHY it blocked)
+      - matched: str (the exact token/pattern — identifier, not language)
+    """
     blocked: bool
-    reason: str = ""
+    cause: NarasimhaCause | None = None
+    matched: str = ""  # the exact intent or pattern that triggered
 
 
 # Intents that should never reach the federation
@@ -54,7 +67,8 @@ def gate(intent: dict) -> NarasimhaVerdict:
     if intent_str in _BLOCKED_INTENTS:
         return NarasimhaVerdict(
             blocked=True,
-            reason=f"blocked intent: {intent_str}",
+            cause=NarasimhaCause.BLOCKED_INTENT,
+            matched=intent_str,
         )
 
     # Block dangerous substrings
@@ -62,7 +76,8 @@ def gate(intent: dict) -> NarasimhaVerdict:
         if danger in intent_str:
             return NarasimhaVerdict(
                 blocked=True,
-                reason=f"dangerous pattern: {danger!r}",
+                cause=NarasimhaCause.DANGEROUS_PATTERN,
+                matched=danger,
             )
 
     return NarasimhaVerdict(blocked=False)

@@ -17,12 +17,12 @@ Buddhi DISCRIMINATES (Viveka) between Sat and Asat by reading:
 
 Then it DECIDES: allowed tools, model tier, max_tokens, phase constraints.
 
-The philosophical test: "If I remove the LLM entirely, does Buddhi still
-make correct decisions?" → YES. Everything here is deterministic.
+ANAURALIA CONSTRAINT: No natural language between Antahkarana components.
+BuddhiVerdict carries cause (enum), gandha_cause (enum), counts, and identifiers.
+No prose strings. No "reason" or "suggestion" in English.
+Buddhi operates ABOVE language (BG 3.42). It reads numbers, not words.
 
 Narasimha (kill-switch) runs BEFORE Buddhi — see narasimha.py.
-Narasimha blocks dangerous strings. Buddhi discriminates with intelligence.
-
 Mirrors steward/buddhi.py (618 lines). Pure stdlib.
 """
 from __future__ import annotations
@@ -33,6 +33,7 @@ from dataclasses import dataclass, field
 from mahaclaw.chitta import (
     Chitta,
     ExecutionPhase,
+    GandhaCause,
     Impression,
     VerdictAction,
     Detection,
@@ -46,7 +47,10 @@ from mahaclaw.manas import (
     ManasPerception,
     perceive,
 )
-from mahaclaw.narasimha import gate as narasimha_gate
+from mahaclaw.narasimha import (
+    NarasimhaCause,
+    gate as narasimha_gate,
+)
 from mahaclaw.pani import (
     ToolNamespace,
     resolve_namespaces,
@@ -64,6 +68,23 @@ class ModelTier(str, enum.Enum):
     FLASH = "flash"         # Fast, cheap, read-only tasks
     STANDARD = "standard"   # Normal development work
     PRO = "pro"             # Complex design, architecture
+
+
+# ---------------------------------------------------------------------------
+# BuddhiCause — WHY Buddhi decided (enum, not prose)
+# ---------------------------------------------------------------------------
+
+class BuddhiCause(str, enum.Enum):
+    """Why Buddhi made this decision. Structured — no prose."""
+    NONE = "none"                         # no issue, CONTINUE
+    GANDHA_DETECTION = "gandha_detection"  # Gandha found a pattern
+    TOOL_FAILURE = "tool_failure"          # last tool call failed
+    PHASE_TRANSITION = "phase_transition"  # phase changed
+    NARASIMHA_BLOCK = "narasimha_block"    # Narasimha kill-switch triggered
+    INVALID_PRIORITY = "invalid_priority"  # priority not in valid set
+    RESTRICTED_TARGET = "restricted_target"  # elevated trust target
+    INVALID_TTL = "invalid_ttl"            # TTL ≤ 0
+    EXCESSIVE_TTL = "excessive_ttl"        # TTL > 1 hour
 
 
 # ---------------------------------------------------------------------------
@@ -111,10 +132,6 @@ _PHASE_MODULATION: dict[ExecutionPhase, float] = {
 }
 
 # Phase → namespace overlay (what namespaces are ALLOWED in this phase)
-# ORIENT: read-only (no overlay — base action namespaces only)
-# EXECUTE: full access (add MODIFY + EXECUTE)
-# VERIFY: no new writes (OBSERVE + EXECUTE for running tests)
-# COMPLETE: wrap up (OBSERVE only)
 _PHASE_NS_OVERLAY: dict[ExecutionPhase, frozenset[ToolNamespace]] = {
     ExecutionPhase.ORIENT: frozenset(),
     ExecutionPhase.EXECUTE: frozenset({ToolNamespace.MODIFY, ToolNamespace.EXECUTE}),
@@ -135,12 +152,12 @@ _GUARDIAN_ESCALATE = frozenset({
     "nrisimha", "prahlada", "shambhu", "kumaras",
 })
 
-# Phase transition guidance messages
-_PHASE_GUIDANCE: dict[tuple[str, str], str] = {
-    ("EXECUTE", "VERIFY"): "Consider running tests to verify your changes.",
-    ("VERIFY", "COMPLETE"): "Changes verified. Prepare final summary.",
-    ("ORIENT", "EXECUTE"): "Understanding gathered. Begin implementation.",
-}
+# Phase transitions that trigger REFLECT (structured, no prose)
+_REFLECT_TRANSITIONS: frozenset[tuple[ExecutionPhase, ExecutionPhase]] = frozenset({
+    (ExecutionPhase.ORIENT, ExecutionPhase.EXECUTE),
+    (ExecutionPhase.EXECUTE, ExecutionPhase.VERIFY),
+    (ExecutionPhase.VERIFY, ExecutionPhase.COMPLETE),
+})
 
 # Valid priorities and NADI types (for intent validation)
 VALID_PRIORITIES = frozenset({"tamas", "rajas", "sattva", "suddha"})
@@ -197,15 +214,43 @@ class HebbianSynaptic:
 
 
 # ---------------------------------------------------------------------------
-# BuddhiVerdict — post-execution judgment
+# BuddhiVerdict — post-execution judgment (ANAURALIA: no prose fields)
 # ---------------------------------------------------------------------------
 
 @dataclass(frozen=True, slots=True)
 class BuddhiVerdict:
-    """Buddhi's post-execution verdict (from evaluate)."""
+    """Buddhi's verdict — structured, non-linguistic.
+
+    ANAURALIA: No reason/suggestion strings. Components communicate via:
+      - action: VerdictAction (enum)
+      - cause: BuddhiCause (enum — WHY this decision)
+      - gandha_cause: GandhaCause | None (enum — what Gandha detected)
+      - narasimha_cause: NarasimhaCause | None (enum — what Narasimha blocked)
+      - tool_name: str (identifier, not language)
+      - matched: str (exact token that triggered — identifier)
+      - error_count: int
+      - threshold: int
+      - ratio: float
+      - from_phase / to_phase: ExecutionPhase (enum)
+      - ttl_ms: int (the value that was invalid)
+      - priority: str (the value that was invalid — enum value)
+      - target: str (the restricted target — identifier)
+    """
     action: VerdictAction
-    reason: str = ""
-    suggestion: str = ""
+    cause: BuddhiCause = BuddhiCause.NONE
+    gandha_cause: GandhaCause | None = None
+    narasimha_cause: NarasimhaCause | None = None
+    tool_name: str = ""       # identifier (e.g. "bash", "write_file")
+    matched: str = ""         # exact token that triggered (identifier)
+    error_count: int = 0
+    threshold: int = 0
+    ratio: float = 0.0
+    path: str = ""            # file path identifier
+    from_phase: ExecutionPhase | None = None
+    to_phase: ExecutionPhase | None = None
+    ttl_ms: int = 0           # the TTL value (for INVALID_TTL/EXCESSIVE_TTL)
+    priority: str = ""        # the priority value (for INVALID_PRIORITY)
+    target: str = ""          # the target value (for RESTRICTED_TARGET)
 
 
 # ---------------------------------------------------------------------------
@@ -221,6 +266,8 @@ class BuddhiDirective:
       - What model tier to use?
       - How many tokens?
       - What phase constraints apply?
+
+    ANAURALIA: Every field is an enum, frozenset, or int. No strings.
     """
     allowed_tools: frozenset[str]
     tier: ModelTier
@@ -271,6 +318,9 @@ class Buddhi:
     Two main operations:
       - pre_flight(): BEFORE tool execution — decide tools, tier, tokens
       - evaluate(): AFTER tool execution — judge results, detect patterns
+
+    ANAURALIA: All inter-component communication is numeric/enum.
+    No natural language flows through Buddhi.
     """
 
     def __init__(self) -> None:
@@ -325,20 +375,16 @@ class Buddhi:
         phase_ns = _PHASE_NS_OVERLAY.get(phase, frozenset())
 
         if phase == ExecutionPhase.ORIENT:
-            # ORIENT: restrict to OBSERVE only (read before you write)
             effective_ns = action_ns & frozenset({ToolNamespace.OBSERVE})
             if not effective_ns:
                 effective_ns = frozenset({ToolNamespace.OBSERVE})
         elif phase == ExecutionPhase.COMPLETE:
-            # COMPLETE: OBSERVE only
             effective_ns = frozenset({ToolNamespace.OBSERVE})
         elif phase == ExecutionPhase.VERIFY:
-            # VERIFY: OBSERVE + EXECUTE (run tests, no new writes)
             effective_ns = action_ns & phase_ns
             if not effective_ns:
                 effective_ns = frozenset({ToolNamespace.OBSERVE})
         else:
-            # EXECUTE: full action namespaces
             effective_ns = action_ns
 
         # Resolve to concrete tool names
@@ -357,26 +403,21 @@ class Buddhi:
         max_tokens = _process_cbr(effective_weight)
 
         # Step 7: Tier selection (5-layer cascade)
-        # Layer 1: Base tier from action
         tier = _ACTION_TIER.get(perception.action, ModelTier.STANDARD)
 
-        # Layer 2: Hebbian adjustment
         confidence = self.synaptic.confidence
         if confidence < 0.25:
             tier = ModelTier.PRO
         elif confidence < 0.4:
             tier = _escalate_tier(tier)
 
-        # Layer 3: Guardian modulation
         if guardian in _GUARDIAN_ESCALATE:
             tier = _escalate_tier(tier)
 
-        # Layer 4: Phase demotion (PRO → STANDARD in VERIFY/COMPLETE)
         if phase in (ExecutionPhase.VERIFY, ExecutionPhase.COMPLETE):
             if tier == ModelTier.PRO:
                 tier = _demote_tier(tier)
 
-        # Layer 5: Context pressure (≥70% → FLASH)
         if context_pct >= 0.7:
             tier = ModelTier.FLASH
 
@@ -396,15 +437,15 @@ class Buddhi:
     ) -> BuddhiVerdict:
         """Post-execution evaluation — judge results via Gandha.
 
+        ANAURALIA: Returns structured BuddhiVerdict with enums and counts.
+        No prose. No English. Pure Viveka.
+
         Pipeline:
           1. Record impressions in Chitta (if provided)
           2. Update Hebbian weights
           3. Run Gandha pattern detection
           4. Tool failure → REDIRECT
-          5. Phase transition → REFLECT with guidance
-
-        Args:
-            tool_calls: List of (name, params_hash, success, error, path) tuples.
+          5. Phase transition → REFLECT
         """
         # Step 1 + 2: Record and learn
         if tool_calls:
@@ -417,8 +458,13 @@ class Buddhi:
         if detection is not None:
             return BuddhiVerdict(
                 action=detection.severity,
-                reason=detection.reason,
-                suggestion=detection.suggestion,
+                cause=BuddhiCause.GANDHA_DETECTION,
+                gandha_cause=detection.cause,
+                tool_name=detection.tool_name,
+                error_count=detection.count,
+                threshold=detection.threshold,
+                ratio=detection.ratio,
+                path=detection.path,
             )
 
         # Step 4: Recent tool failure → REDIRECT
@@ -426,21 +472,21 @@ class Buddhi:
         if recent and not recent[0].success:
             return BuddhiVerdict(
                 action=VerdictAction.REDIRECT,
-                reason=f"Tool '{recent[0].name}' failed: {recent[0].error}",
-                suggestion="try a different approach",
+                cause=BuddhiCause.TOOL_FAILURE,
+                tool_name=recent[0].name,
             )
 
-        # Step 5: Phase transition guidance
+        # Step 5: Phase transition
         current_phase = self.chitta.phase
         if self._last_phase is not None and self._last_phase != current_phase:
-            guidance_key = (self._last_phase.value, current_phase.value)
-            guidance = _PHASE_GUIDANCE.get(guidance_key, "")
-            if guidance:
+            transition = (self._last_phase, current_phase)
+            if transition in _REFLECT_TRANSITIONS:
                 self._last_phase = current_phase
                 return BuddhiVerdict(
                     action=VerdictAction.REFLECT,
-                    reason=f"Phase transition: {guidance_key[0]} → {guidance_key[1]}",
-                    suggestion=guidance,
+                    cause=BuddhiCause.PHASE_TRANSITION,
+                    from_phase=transition[0],
+                    to_phase=transition[1],
                 )
         self._last_phase = current_phase
 
@@ -466,50 +512,49 @@ class Buddhi:
 def check_intent(intent: dict) -> BuddhiVerdict:
     """Pre-flight intent check — Narasimha + Buddhi validation.
 
-    This combines:
-      1. Narasimha kill-switch (string blocklist → ABORT)
-      2. Buddhi validation (priority, TTL, restricted targets → REDIRECT/REFLECT)
-
-    Kept as a standalone function for the 5-gate pipeline where
-    a full Buddhi instance isn't instantiated yet.
+    ANAURALIA: Returns structured verdict with cause enum + identifiers.
+    No prose flows between Narasimha and Buddhi.
     """
     # Layer 1: Narasimha kill-switch
     nv = narasimha_gate(intent)
     if nv.blocked:
         return BuddhiVerdict(
             action=VerdictAction.ABORT,
-            reason=nv.reason,
+            cause=BuddhiCause.NARASIMHA_BLOCK,
+            narasimha_cause=nv.cause,
+            matched=nv.matched,
         )
 
     # Layer 2: Buddhi validation (priority, TTL, restricted targets)
-    priority = intent.get("priority", "rajas")
-    if priority not in VALID_PRIORITIES:
+    priority_val = intent.get("priority", "rajas")
+    if priority_val not in VALID_PRIORITIES:
         return BuddhiVerdict(
             action=VerdictAction.REDIRECT,
-            reason=f"unknown priority: {priority}",
-            suggestion=f"use one of: {', '.join(sorted(VALID_PRIORITIES))}",
+            cause=BuddhiCause.INVALID_PRIORITY,
+            priority=priority_val,
         )
 
-    target = intent.get("target", "")
-    if target in _RESTRICTED_TARGETS and priority in ("sattva", "suddha"):
+    target_val = intent.get("target", "")
+    if target_val in _RESTRICTED_TARGETS and priority_val in ("sattva", "suddha"):
         return BuddhiVerdict(
             action=VerdictAction.REFLECT,
-            reason=f"elevated priority {priority} to restricted target {target}",
-            suggestion="consider using rajas priority unless urgent",
+            cause=BuddhiCause.RESTRICTED_TARGET,
+            target=target_val,
+            priority=priority_val,
         )
 
-    ttl_ms = intent.get("ttl_ms", 24_000)
-    if ttl_ms <= 0:
+    ttl_val = intent.get("ttl_ms", 24_000)
+    if ttl_val <= 0:
         return BuddhiVerdict(
             action=VerdictAction.REDIRECT,
-            reason="ttl_ms must be positive",
-            suggestion="use default 24000ms",
+            cause=BuddhiCause.INVALID_TTL,
+            ttl_ms=ttl_val,
         )
-    if ttl_ms > 3_600_000:
+    if ttl_val > 3_600_000:
         return BuddhiVerdict(
             action=VerdictAction.REFLECT,
-            reason=f"very long TTL: {ttl_ms}ms",
-            suggestion="consider a shorter TTL",
+            cause=BuddhiCause.EXCESSIVE_TTL,
+            ttl_ms=ttl_val,
         )
 
     return BuddhiVerdict(action=VerdictAction.CONTINUE)
@@ -518,14 +563,18 @@ def check_intent(intent: dict) -> BuddhiVerdict:
 def evaluate(chitta: Chitta) -> BuddhiVerdict:
     """Standalone evaluate — runs Gandha on Chitta's impressions.
 
-    Kept for backward compatibility. For full Antahkarana coordination,
-    use Buddhi().evaluate() instead.
+    ANAURALIA: Returns structured verdict. No prose.
     """
     detection = detect_patterns(chitta.impressions, chitta.prior_reads)
     if detection is None:
         return BuddhiVerdict(action=VerdictAction.CONTINUE)
     return BuddhiVerdict(
         action=detection.severity,
-        reason=detection.reason,
-        suggestion=detection.suggestion,
+        cause=BuddhiCause.GANDHA_DETECTION,
+        gandha_cause=detection.cause,
+        tool_name=detection.tool_name,
+        error_count=detection.count,
+        threshold=detection.threshold,
+        ratio=detection.ratio,
+        path=detection.path,
     )

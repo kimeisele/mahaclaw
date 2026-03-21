@@ -89,7 +89,7 @@ class TestVerticalFlow:
         # === ELEMENT 3: Buddhi (safety gate) ===
         from mahaclaw.buddhi import check_intent, VerdictAction
         verdict = check_intent(intent)
-        assert verdict.action == VerdictAction.CONTINUE, f"Buddhi blocked: {verdict.reason}"
+        assert verdict.action == VerdictAction.CONTINUE, f"Buddhi blocked: {verdict.cause}"
 
         # === ELEMENT 4: Manas (deterministic seed routing) ===
         from mahaclaw.manas import perceive, ActionType
@@ -198,15 +198,18 @@ class TestVerticalFlow:
         # === ELEMENT 12: Gandha (pattern detection) ===
         from mahaclaw.chitta import detect_patterns
         from mahaclaw.buddhi import evaluate
+        from mahaclaw.chitta import GandhaCause
+        from mahaclaw.buddhi import BuddhiCause
         detection = detect_patterns(chitta.impressions)
         # Should detect blind write (wrote outbox without reading it)
         assert detection is not None
-        assert detection.pattern == "write_without_read"
+        assert detection.cause == GandhaCause.WRITE_WITHOUT_READ
 
         # Via Buddhi evaluate (Buddhi calls Gandha, not duplicate)
         buddhi_verdict = evaluate(chitta)
-        assert buddhi_verdict.action.value == "redirect"  # Gandha's suggestion
-        assert "write" in buddhi_verdict.reason.lower() or "blind" in buddhi_verdict.reason.lower()
+        assert buddhi_verdict.action.value == "redirect"
+        assert buddhi_verdict.cause == BuddhiCause.GANDHA_DETECTION
+        assert buddhi_verdict.gandha_cause == GandhaCause.WRITE_WITHOUT_READ
 
         # === ELEMENT 13: Inbox (response polling — simulated) ===
         from mahaclaw.inbox import poll_response
@@ -338,15 +341,20 @@ class TestVerticalFlow:
             "payload": {},
         }))
 
+        from mahaclaw.narasimha import NarasimhaCause
+        from mahaclaw.buddhi import BuddhiCause
+
         # Narasimha blocks BEFORE Buddhi
         nv = narasimha_gate(intent)
         assert nv.blocked is True
-        assert "rm -rf" in nv.reason
+        assert nv.cause == NarasimhaCause.DANGEROUS_PATTERN
+        assert nv.matched == "rm -rf"
 
         # check_intent delegates to Narasimha first
         verdict = check_intent(intent)
         assert verdict.action == VerdictAction.ABORT
-        assert "rm -rf" in verdict.reason
+        assert verdict.cause == BuddhiCause.NARASIMHA_BLOCK
+        assert verdict.matched == "rm -rf"
         # Pipeline STOPS here. No Tattva, no RAMA, no envelope.
 
     def test_antahkarana_full_flow(self):

@@ -9,6 +9,7 @@ import pytest
 
 from mahaclaw.buddhi import (
     Buddhi,
+    BuddhiCause,
     BuddhiDirective,
     BuddhiVerdict,
     HebbianSynaptic,
@@ -17,9 +18,10 @@ from mahaclaw.buddhi import (
     check_intent,
     evaluate,
 )
+from mahaclaw.chitta import GandhaCause
 from mahaclaw.chitta import Chitta, ExecutionPhase
 from mahaclaw.manas import ActionType, IntentGuna
-from mahaclaw.narasimha import gate as narasimha_gate, NarasimhaVerdict
+from mahaclaw.narasimha import gate as narasimha_gate, NarasimhaVerdict, NarasimhaCause
 from mahaclaw.pani import ToolNamespace
 
 
@@ -37,12 +39,14 @@ class TestNarasimha:
     def test_blocked_intent(self):
         v = narasimha_gate({"intent": "delete_all"})
         assert v.blocked is True
-        assert "blocked" in v.reason
+        assert v.cause == NarasimhaCause.BLOCKED_INTENT
+        assert v.matched == "delete_all"
 
     def test_rm_rf_blocked(self):
         v = narasimha_gate({"intent": "rm -rf everything"})
         assert v.blocked is True
-        assert "rm -rf" in v.reason
+        assert v.cause == NarasimhaCause.DANGEROUS_PATTERN
+        assert v.matched == "rm -rf"
 
     def test_bypass_viveka_blocked(self):
         v = narasimha_gate({"intent": "bypass_viveka"})
@@ -75,7 +79,8 @@ class TestCheckIntent:
     def test_dangerous_intent_aborts_via_narasimha(self):
         v = check_intent({"intent": "rm -rf everything"})
         assert v.action == VerdictAction.ABORT
-        assert "rm -rf" in v.reason
+        assert v.cause == BuddhiCause.NARASIMHA_BLOCK
+        assert v.matched == "rm -rf"
 
     def test_invalid_priority_redirects(self):
         v = check_intent({"intent": "ok", "priority": "mega"})
@@ -333,7 +338,8 @@ class TestBuddhiEvaluate:
         b = Buddhi()
         v = b.evaluate([("write_file", 1, True, "", "/new.py")])
         assert v.action == VerdictAction.REDIRECT
-        assert "write" in v.reason.lower() or "blind" in v.reason.lower()
+        assert v.cause == BuddhiCause.GANDHA_DETECTION
+        assert v.gandha_cause == GandhaCause.WRITE_WITHOUT_READ
 
     def test_gandha_detects_consecutive_errors(self):
         b = Buddhi()
@@ -348,7 +354,7 @@ class TestBuddhiEvaluate:
         assert b.synaptic.weight("bash") != 0.5
 
     def test_phase_transition_reflects(self):
-        """Phase change triggers REFLECT with guidance."""
+        """Phase change triggers REFLECT with structured phase data."""
         b = Buddhi()
         # Set initial phase tracking
         b._last_phase = ExecutionPhase.ORIENT
@@ -358,7 +364,9 @@ class TestBuddhiEvaluate:
         v = b.evaluate()
         # Phase changed from ORIENT → EXECUTE
         if v.action == VerdictAction.REFLECT:
-            assert "ORIENT" in v.reason and "EXECUTE" in v.reason
+            assert v.cause == BuddhiCause.PHASE_TRANSITION
+            assert v.from_phase == ExecutionPhase.ORIENT
+            assert v.to_phase == ExecutionPhase.EXECUTE
 
 
 # ---------------------------------------------------------------------------
