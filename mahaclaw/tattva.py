@@ -3,10 +3,15 @@
 Maps OpenClaw intents to a 5-dimensional affinity vector across the
 Pancha Mahabhuta elements.  The dominant element determines the
 federation zone and NADI type for routing.
+
+Now powered by Manas (deterministic router) instead of static rules.
+Manas perceives the intent → ActionType → zone → element → affinity.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
+
+from .manas import perceive, route_zone, route_nadi, ActionType, _KEYWORD_ACTIONS
 
 # Element → agent-city zone mapping
 ELEMENT_ZONES = {
@@ -26,34 +31,30 @@ ELEMENT_NADI = {
     "prithvi": "prana",
 }
 
-# Intent keyword → element affinity weights.
-# Keys are substring-matched against the intent string.
-_AFFINITY_RULES: list[tuple[str, dict[str, float]]] = [
-    # Communication / status
-    ("heartbeat",       {"vayu": 1.0}),
-    ("ping",            {"vayu": 1.0}),
-    ("status",          {"vayu": 0.8, "akasha": 0.3}),
-    # Research / knowledge
-    ("inquiry",         {"jala": 0.9, "akasha": 0.4}),
-    ("research",        {"jala": 1.0}),
-    ("question",        {"jala": 0.9, "akasha": 0.3}),
-    ("analysis",        {"jala": 0.7, "prithvi": 0.5}),
-    # Engineering / code
-    ("code",            {"prithvi": 1.0}),
-    ("build",           {"prithvi": 1.0}),
-    ("test",            {"prithvi": 0.9, "agni": 0.2}),
-    ("deploy",          {"prithvi": 0.8, "agni": 0.3}),
-    ("fix",             {"prithvi": 0.9}),
-    # Governance / policy
-    ("governance",      {"agni": 1.0}),
-    ("policy",          {"agni": 1.0}),
-    ("vote",            {"agni": 0.9, "vayu": 0.3}),
-    ("trust",           {"agni": 0.8, "akasha": 0.3}),
-    # Discovery / exploration
-    ("discover",        {"akasha": 1.0}),
-    ("explore",         {"akasha": 0.9, "jala": 0.3}),
-    ("search",          {"akasha": 0.8, "jala": 0.4}),
-]
+# Zone → dominant element (reverse of ELEMENT_ZONES)
+_ZONE_TO_ELEMENT = {
+    "discovery": "akasha",
+    "general": "vayu",
+    "governance": "agni",
+    "research": "jala",
+    "engineering": "prithvi",
+}
+
+# ActionType → element affinity weights (replaces static _AFFINITY_RULES)
+_ACTION_AFFINITIES: dict[ActionType, dict[str, float]] = {
+    ActionType.RESEARCH:  {"jala": 0.9, "akasha": 0.4},
+    ActionType.IMPLEMENT: {"prithvi": 1.0},
+    ActionType.REFACTOR:  {"prithvi": 0.8, "agni": 0.3},
+    ActionType.DEBUG:     {"prithvi": 0.9},
+    ActionType.REVIEW:    {"agni": 0.8, "jala": 0.3},
+    ActionType.MONITOR:   {"vayu": 1.0},
+    ActionType.RESPOND:   {"vayu": 0.8, "akasha": 0.3},
+    ActionType.DESIGN:    {"prithvi": 0.7, "jala": 0.5},
+    ActionType.TEST:      {"prithvi": 0.9, "agni": 0.2},
+    ActionType.DEPLOY:    {"prithvi": 0.8, "agni": 0.3},
+    ActionType.GOVERN:    {"agni": 1.0},
+    ActionType.DISCOVER:  {"akasha": 1.0},
+}
 
 ELEMENTS = ("akasha", "vayu", "agni", "jala", "prithvi")
 
@@ -76,28 +77,42 @@ class TattvaResult:
 
 
 def classify(intent: dict) -> TattvaResult:
-    """Classify an OpenClaw intent into the Five Tattva dimensions."""
+    """Classify an OpenClaw intent into the Five Tattva dimensions.
+
+    Uses Manas (deterministic router) to perceive the intent, then maps
+    the perception to a 5D affinity vector. Zero LLM.
+    """
     intent_str = intent["intent"]
+
+    # Manas perceives the intent
+    perception = perceive(intent_str)
+
+    # Check if any keyword actually matched (vs pure seed fallback)
+    _keyword_matched = any(kw in intent_str.lower() for kw, _ in _KEYWORD_ACTIONS)
+
+    if _keyword_matched:
+        zone = route_zone(perception)
+        nadi_type = route_nadi(perception)
+    else:
+        # No keyword match = unknown intent → vayu/general (safe default)
+        zone = "general"
+        nadi_type = "vyana"
+
+    # Build affinity vector from ActionType
+    weights = _ACTION_AFFINITIES.get(perception.action, {})
     scores = {e: 0.0 for e in ELEMENTS}
-
-    matched = False
-    for keyword, weights in _AFFINITY_RULES:
-        if keyword in intent_str:
-            for element, weight in weights.items():
-                scores[element] = max(scores[element], weight)
-            matched = True
-
-    # Fallback: if no rule matched, default to vayu (general communication)
-    if not matched:
+    if _keyword_matched:
+        for element, weight in weights.items():
+            scores[element] = weight
+    else:
         scores["vayu"] = 0.5
 
-    # Determine dominant element
-    dominant = max(scores, key=scores.__getitem__) # type: ignore[arg-type]
+    dominant = _ZONE_TO_ELEMENT.get(zone, "vayu")
     affinity = tuple(scores[e] for e in ELEMENTS)
 
     return TattvaResult(
         affinity=affinity,  # type: ignore[arg-type]
         dominant=dominant,
-        zone=ELEMENT_ZONES[dominant],
-        nadi_type=ELEMENT_NADI[dominant],
+        zone=zone,
+        nadi_type=nadi_type,
     )
