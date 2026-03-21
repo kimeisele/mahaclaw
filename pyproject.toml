@@ -3,14 +3,15 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "agent-template"
+name = "mahaclaw"
 version = "0.1.0"
-description = "Federation node template for the agent-internet"
+description = "Your own personal AI assistant — the steward way"
 requires-python = ">=3.11"
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
+    "pytest-asyncio>=0.23",
     "ruff>=0.6.0",
 ]
 
@@ -23,3 +24,4 @@ select = ["E", "F", "I", "W"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+asyncio_mode = "auto"
