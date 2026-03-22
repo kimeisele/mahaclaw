@@ -44,9 +44,8 @@ Two implementations in steward-protocol:
 - **steward-protocol**: `vibe_core/plugins/opus_assistant/manas/cortex/mukha.py` → `AgentIdentity`, `IdentityScanner`, `MukhaGenerator`
 - **steward**: `steward/identity.py` → `StewardIdentity` — SHA-256 fingerprint from `STEWARD_IDENTITY_SEED`
 - **agent-city**: `city/identity.py` → `AgentIdentity` (ECDSA NIST256p), `city/claims.py` → `ClaimLevel` (DISCOVERED→CRYPTO_VERIFIED)
-- **Maha Claw**: ❌ NOT WIRED. MahaHeader uses SHA-256 hash but no ECDSA signing.
-- **Wire**: Import crypto.py or reimplement ECDSA signing for envelopes. Ahamkara = every envelope is signed.
-- **Status**: ✅ Working in steward + agent-city. ❌ Missing in Maha Claw.
+- **Maha Claw**: ✅ WIRED. `mahaclaw/ahamkara.py` → `Identity`, `stamp_envelope()`, `sign_envelope()`, `verify_envelope()`. HMAC-SHA256 (stdlib) + optional ECDSA NIST256p. Fingerprint = SHA-256(public_material)[:16]. All envelopes signed via `build_and_enqueue()`.
+- **Status**: ✅ Working in steward + agent-city + Maha Claw.
 
 ## 5. Manas (मनस्) — Mind / Deterministic Router
 
@@ -95,9 +94,8 @@ Two implementations in steward-protocol:
 
 - **steward-protocol**: `veda.py` Phase 3 → `class Pratyaya` — trust validation, authorization, preconditions
 - **steward**: `AgentLoop._clamp_params` — parameter validation
-- **Maha Claw**: ❌ No trust/auth validation beyond JSON schema
-- **Wire**: Add Pratyaya-style trust gate
-- **Status**: ✅ steward-protocol. ❌ Missing in Maha Claw.
+- **Maha Claw**: ✅ WIRED. `mahaclaw/rasa.py` → `TrustLevel` enum (UNKNOWN→INTERNAL), `RasaCause` enum, `RasaVerdict`, `validate()`. Checks source trust vs target requirements and priority requirements. Deterministic, no LLM.
+- **Status**: ✅ Working.
 
 ### 11. Gandha (गन्ध) — Smell / Pattern Detection
 
@@ -136,9 +134,8 @@ Two implementations in steward-protocol:
 
 - **steward**: `steward/senses/testing_sense.py` → `TestingSense` — code quality via tests
 - **steward-protocol**: `cortex/dharma_sense.py` → `DharmaSense` — ethical quality, bhakti score
-- **Maha Claw**: ❌ No preference learning
-- **Wire**: Could track user preferences via session history patterns
-- **Status**: ✅ steward. ❌ Missing in Maha Claw.
+- **Maha Claw**: ✅ WIRED. `mahaclaw/rasana.py` → `Rasana` class — tracks target_counts, action_counts, tool_success/tool_total. Properties: preferred_target, preferred_action, tool_success_rate(), top_tools. Persistence via to_summary()/load_summary(). All counts and ratios — no prose.
+- **Status**: ✅ Working.
 
 ### 16. Ghrana (घ्राण) — Smell / Anomaly Detection
 
@@ -173,25 +170,22 @@ Two implementations in steward-protocol:
 - **steward-protocol**: `vibe_core/mahamantra/adapters/attention.py` → `MahaAttention` — O(1) Lotus routing
 - **agent-city**: `city/router.py` → `CityRouter` (cap/dom/tier), `city/attention.py` → `CityAttention`
 - **agent-internet**: `router.py` → `RegistryRouter.resolve_next_hop()` — prefix-longest-match
-- **Maha Claw**: `lotus.py` → static route table from seed files. No dynamic discovery.
-- **Wire**: Add peer discovery / route refresh from federation heartbeats
-- **Status**: ✅ steward + agent-internet. ⚠️ Maha Claw static only.
+- **Maha Claw**: ✅ WIRED. `mahaclaw/pada.py` → `discover_from_inbox()` scans inbox for peer announcements, `extract_peer_from_envelope()` extracts routing info, `refresh_routes()` triggers Lotus reload. Merged with `lotus.py` static routes.
+- **Status**: ✅ Working.
 
 ### 20. Payu (पायु) — Elimination / Garbage Collection
 
 - **steward**: `steward/context.py` → `SamskaraContext.compact` — context compaction
 - **steward-protocol**: `manas/shiva.py` → `ShivaLifecycleManager` — destroys stale intents
-- **Maha Claw**: ❌ No cleanup. Outbox grows forever. Sessions never expire.
-- **Wire**: Add outbox rotation, session expiry, stale envelope removal
-- **Status**: ✅ steward. ❌ Missing in Maha Claw.
+- **Maha Claw**: ✅ WIRED. `mahaclaw/payu.py` → `rotate_outbox()` (age + size limits), `expire_sessions()` (SQLite TTL + orphan cleanup), `clean_inbox()`, `sweep()` (full cleanup). Returns `PayuResult` with counts.
+- **Status**: ✅ Working.
 
 ### 21. Upastha (उपस्थ) — Generation / Artifact Creation
 
 - **steward**: `steward/services.py` → `boot` — service wiring
 - **steward-protocol**: `cortex/sankalpa.py` → `SankalpaOrchestrator`, `intent_generator.py` → `IntentGenerator` — proactive strategy
-- **Maha Claw**: `skills/engine.py` → `SkillEngine` — skill discovery + dispatch
-- **Wire**: Connect skill output to envelope pipeline
-- **Status**: ✅ steward. ⚠️ Maha Claw has skills, partially wired.
+- **Maha Claw**: ✅ WIRED. `mahaclaw/upastha.py` → `skill_to_intent()` converts SkillResult to federation intent, `generate()` routes through full 5-gate pipeline to nadi_outbox.json. `GenerationStatus` enum + `GenerationResult` dataclass. Connected to `skills/engine.py`.
+- **Status**: ✅ Working.
 
 ---
 
@@ -252,23 +246,23 @@ Two implementations in steward-protocol:
 
 ### Vedana — Health Pulse
 - **steward**: `steward/antahkarana/vedana.py` → `VedanaSignal` — composite health (0.0–1.0), guna derived from health
-- **Maha Claw**: ❌ No health pulse
-- **Wire**: Add basic health metric (uptime, error rate, queue depth)
+- **Maha Claw**: ✅ WIRED. `mahaclaw/vedana.py` → `pulse()` → `VedanaSignal`. Weighted composite: error_rate (0.4) + confidence (0.3) + phase_health (0.2) + queue_pressure (0.1). `HealthGuna`: SATTVA (≥0.7), RAJAS (0.4–0.7), TAMAS (<0.4).
+- **Status**: ✅ Working.
 
 ### KsetraJna — Meta-Observer
 - **steward**: `steward/antahkarana/ksetrajna.py` → `KsetraJna` → `BubbleSnapshot` — frozen peer-readable state digest
-- **Maha Claw**: `lotus.py` → `buddy_bubble()` is a proto-KsetraJna (exports routing snapshot)
-- **Wire**: Expand buddy_bubble to include session, health, pipeline state
+- **Maha Claw**: ✅ WIRED. `mahaclaw/ksetrajna.py` → `observe()` → `BubbleSnapshot`. Full state digest: routing (route_count, peers_available), Chitta (impressions, phase, errors), health (Vedana score), identity (fingerprint, signing_method), pipeline (outbox/inbox depth), integrity (snapshot_hash). Expands buddy_bubble().
+- **Status**: ✅ Working.
 
 ### Narasimha — Kill Switch
 - **steward**: `steward/loop/tool_dispatch.py` Gate 2 → `NarasimhaProtocol.audit_agent()`, `ThreatLevel` GREEN→APOCALYPSE
-- **Maha Claw**: `tools/sandbox.py` has allowlist + blocked commands = proto-Narasimha
-- **Wire**: Formalize threat levels, add to pipeline gate
+- **Maha Claw**: ✅ WIRED. `mahaclaw/narasimha.py` → `gate()` → `NarasimhaVerdict`. `NarasimhaCause` enum. Token-matching kill-switch, runs BEFORE Buddhi. Extracted from buddhi.py as separate guardian.
+- **Status**: ✅ Working.
 
 ### Cetana — Autonomous Heartbeat
 - **steward**: `steward/cetana.py` → 4-phase MURALI cycle, adaptive frequency
-- **Maha Claw**: `federation-heartbeat.yml` GitHub Action = external Cetana
-- **Wire**: Add in-process heartbeat daemon thread
+- **Maha Claw**: ✅ WIRED. `mahaclaw/cetana.py` → `CetanaDaemon` (daemon thread), `beat_once()` (MURALI cycle: MEASURE→UPDATE→REPORT→ADAPT→LISTEN→INTEGRATE). Adaptive interval (60s–3600s). Integrates with Pada for peer discovery on LISTEN phase.
+- **Status**: ✅ Working.
 
 ---
 
@@ -276,20 +270,20 @@ Two implementations in steward-protocol:
 
 | Element | Status in Maha Claw | Priority | Action |
 |---------|-------------------|----------|--------|
-| **Buddhi** | ✅ WIRED | **P0** | Antahkarana coordinator with Hebbian learning |
-| **Ahamkara** | ❌ Missing | **P0** | Add ECDSA envelope signing |
-| **Manas** | ✅ Wired | ~~P1~~ | Seed-based routing, verified compat |
-| **Gandha** | ✅ Wired | ~~P1~~ | Pattern detection in chitta.py |
-| **Pani** | ✅ Wired | ~~P1~~ | Tool dispatch pipeline |
-| **Payu** | ❌ Missing | **P2** | Add outbox rotation + session expiry |
-| **Rasa** | ❌ Missing | **P2** | Add trust/auth validation |
-| **Narasimha** | ✅ WIRED | **P2** | Kill-switch extracted from Buddhi |
-| **Chitta** | ✅ Wired | ~~P2~~ | Impression model + phase derivation |
-| **Vedana** | ❌ Missing | **P3** | Add health pulse |
-| **KsetraJna** | ⚠️ Proto | **P3** | Expand buddy_bubble |
-| **Cetana** | External | **P3** | Add in-process heartbeat |
-| **Rasana** | ❌ Missing | **P3** | Track user preferences |
+| **Buddhi** | ✅ WIRED | ~~P0~~ | Antahkarana coordinator with Hebbian learning |
+| **Ahamkara** | ✅ WIRED | ~~P0~~ | HMAC-SHA256 + optional ECDSA envelope signing |
+| **Manas** | ✅ WIRED | ~~P1~~ | Seed-based routing, verified compat |
+| **Gandha** | ✅ WIRED | ~~P1~~ | Pattern detection in chitta.py |
+| **Pani** | ✅ WIRED | ~~P1~~ | Tool dispatch pipeline |
+| **Payu** | ✅ WIRED | ~~P2~~ | Outbox rotation + session expiry |
+| **Rasa** | ✅ WIRED | ~~P2~~ | Trust/auth validation |
+| **Narasimha** | ✅ WIRED | ~~P2~~ | Kill-switch extracted from Buddhi |
+| **Chitta** | ✅ WIRED | ~~P2~~ | Impression model + phase derivation |
+| **Vedana** | ✅ WIRED | ~~P3~~ | Health pulse composite score |
+| **KsetraJna** | ✅ WIRED | ~~P3~~ | Full state digest (BubbleSnapshot) |
+| **Cetana** | ✅ WIRED | ~~P3~~ | In-process MURALI heartbeat daemon |
+| **Rasana** | ✅ WIRED | ~~P3~~ | Preference learning from session patterns |
 | **Vak** | ✅ Done | — | 5-gate pipeline works |
 | **Shrotra** | ✅ Done | — | 4 input channels work |
-| **Pada** | ⚠️ Static | **P2** | Dynamic route discovery |
-| **Upastha** | ⚠️ Partial | **P2** | Connect skill output to pipeline |
+| **Pada** | ✅ WIRED | ~~P2~~ | Dynamic route discovery from inbox |
+| **Upastha** | ✅ WIRED | ~~P2~~ | Skill output → envelope pipeline |

@@ -160,16 +160,28 @@ mahaclaw/
   manas.py              Antahkarana: mind (deterministic seed routing)
   buddhi.py             Antahkarana: intellect (coordinator, Hebbian, tier, phase)
   chitta.py             Antahkarana: memory (impressions, phase, Gandha detection)
+  ahamkara.py           Ahamkara: identity (HMAC-SHA256 + ECDSA signing)
   narasimha.py          Guardian: kill-switch (blocklist, runs before Buddhi)
+  vedana.py             Health pulse (VedanaSignal, HealthGuna, composite score)
+  rasa.py               Trust validation (TrustLevel, RasaVerdict)
+  rasana.py             Preference learning (target/action/tool tracking)
+  payu.py               Garbage collection (outbox rotation, session expiry)
+  ksetrajna.py          Meta-observer (BubbleSnapshot, full state digest)
+  upastha.py            Generation (skill output → envelope pipeline)
+  pada.py               Dynamic routing (peer discovery from inbox)
+  cetana.py             Heartbeat daemon (MURALI cycle, adaptive frequency)
   pani.py               Karmendriya: hands (tool dispatch, namespaces, gates)
   inbox.py              Return loop — poll nadi_inbox.json for responses
   daemon.py             asyncio Unix socket server
   gateway.py            WebSocket gateway (port 18789, stdlib RFC 6455)
   session.py            Session manager (SQLite signed ledger)
+  runtime.py            THE runtime — handle_message() wires all 25 elements
   cli.py                stdin/pipe entry point for OpenClaw skills
   chat.py               standalone terminal chat (federation + standalone LLM)
   llm.py               Provider-agnostic LLM client (OpenAI-compat, curl-based)
   __main__.py           python -m mahaclaw.cli alias
+  web/
+    index.html          Webchat UI (dark/light, WebSocket, no framework)
   channels/
     __init__.py         Channel types (IncomingMessage, MessageHandler)
     telegram.py         Telegram Bot API adapter (long-polling, pure curl)
@@ -194,6 +206,7 @@ tests/
   test_buddhi_antahkarana.py  49 tests (Buddhi coordinator + Narasimha + Hebbian + tiers)
   test_vertical.py      4 tests (full 15-element flows + Antahkarana integration)
   test_anauralia.py     13 tests (lint: no natural language between components)
+  test_elements.py      51 tests (Vedana + Rasa + Rasana + Payu + KsetraJna + Upastha + Pada + Cetana)
   integration/
     mock_openclaw.js    Node.js mock gateway (44 integration tests)
 
