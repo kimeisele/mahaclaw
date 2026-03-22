@@ -219,6 +219,7 @@ async def _process_ws_message(text: str) -> dict:
         return {"text": "", "error": "empty message"}
 
     # Run the blocking runtime in a thread pool
+    # wait_s=5 keeps WebSocket responsive; federation poll won't block too long
     loop = asyncio.get_running_loop()
     response_text = await loop.run_in_executor(
         None,
@@ -227,6 +228,7 @@ async def _process_ws_message(text: str) -> dict:
             session_id=session_id,
             source="webchat",
             mode=_runtime_mode,
+            wait_s=5.0,
         ),
     )
 
