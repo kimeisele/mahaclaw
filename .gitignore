@@ -5,3 +5,4 @@ __pycache__/
 .federation-setup.json
 .agent-internet/
 .mahaclaw/
+mahaclaw_sessions.db
