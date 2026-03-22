@@ -175,10 +175,13 @@ mahaclaw/
   daemon.py             asyncio Unix socket server
   gateway.py            WebSocket gateway (port 18789, stdlib RFC 6455)
   session.py            Session manager (SQLite signed ledger)
+  runtime.py            THE runtime — handle_message() wires all 25 elements
   cli.py                stdin/pipe entry point for OpenClaw skills
   chat.py               standalone terminal chat (federation + standalone LLM)
   llm.py               Provider-agnostic LLM client (OpenAI-compat, curl-based)
   __main__.py           python -m mahaclaw.cli alias
+  web/
+    index.html          Webchat UI (dark/light, WebSocket, no framework)
   channels/
     __init__.py         Channel types (IncomingMessage, MessageHandler)
     telegram.py         Telegram Bot API adapter (long-polling, pure curl)

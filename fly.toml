@@ -1,0 +1,19 @@
+app = "mahaclaw"
+primary_region = "fra"
+
+[build]
+
+[http_service]
+  internal_port = 18789
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+
+  [http_service.concurrency]
+    type = "connections"
+    hard_limit = 50
+    soft_limit = 25
+
+[env]
+  MAHACLAW_MODE = "steward-only"
+  PORT = "18789"
