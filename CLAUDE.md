@@ -105,13 +105,22 @@ Register in agent-city Engineering zone.
 ## How to run
 
 ```bash
-# Tests
-python -m pytest tests/test_mahaclaw.py -q
+# Tests (401 passing)
+python -m pytest tests/ -q
+
+# === QUICKSTART: Webchat with local LLM ===
+ollama serve &
+python -m mahaclaw.gateway --web --standalone
+# Open http://localhost:18789
+
+# === QUICKSTART: Federation mode (steward-only) ===
+python -m mahaclaw.gateway --web --steward-only
+# Open http://localhost:18789
 
 # Daemon mode (Unix socket)
 python -m mahaclaw.daemon
 
-# Gateway mode (WebSocket on :18789, replaces OpenClaw Gateway)
+# Gateway mode (WebSocket on :18789)
 python -m mahaclaw.gateway
 python -m mahaclaw.gateway --port 18789 --host 127.0.0.1
 
@@ -207,6 +216,8 @@ tests/
   test_vertical.py      4 tests (full 15-element flows + Antahkarana integration)
   test_anauralia.py     13 tests (lint: no natural language between components)
   test_elements.py      51 tests (Vedana + Rasa + Rasana + Payu + KsetraJna + Upastha + Pada + Cetana)
+  test_runtime.py       18 tests (25-element flow + Narasimha + standalone + federation + session + anauralia)
+  test_gateway_integration.py  10 tests (HTTP endpoints + WebSocket handshake/chat/errors)
   integration/
     mock_openclaw.js    Node.js mock gateway (44 integration tests)
 
