@@ -15994,5 +15994,48 @@
     "timestamp": 1782135976.1147637,
     "ttl_ms": 24000,
     "ttl_s": 24.0
+  },
+  {
+    "_signature": "HYbe8qsVeyhJXAZD2He6kgb34i+JzeIwtVjM7MK9NQM=",
+    "_signer_fingerprint": "4a588b7c68096de4",
+    "_signing_method": "hmac-sha256",
+    "correlation_id": "b9ed7702-d0c8-40a8-a8f5-109729b1614a",
+    "envelope_id": "env_2a86613b1d014812",
+    "id": "302f2819-4f7a-4386-9405-f76fb74e3f18",
+    "maha_header_hex": "c4c33893621894b86feb64c27b4e4420",
+    "nadi_op": "send",
+    "nadi_priority": "tamas",
+    "nadi_type": "prana",
+    "operation": "heartbeat",
+    "payload": {
+      "_rama": {
+        "affinity": {
+          "agni": 0.0,
+          "akasha": 0.0,
+          "jala": 0.0,
+          "prithvi": 0.9,
+          "vayu": 0.0
+        },
+        "element": "prithvi",
+        "guardian": "parashurama",
+        "guna": "tamas",
+        "operation": "heartbeat",
+        "position": 8,
+        "quarter": "karma",
+        "zone": "engineering"
+      },
+      "_source_intent": "heartbeat",
+      "node": "mahaclaw",
+      "status": "alive",
+      "tests": "passing"
+    },
+    "priority": 1,
+    "source": "mahaclaw",
+    "source_city_id": "mahaclaw",
+    "target": "agent-city",
+    "target_city_id": "kimeisele/agent-city",
+    "timestamp": 1782154898.8317068,
+    "ttl_ms": 24000,
+    "ttl_s": 24.0
   }
 ]
